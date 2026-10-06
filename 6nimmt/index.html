@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>젝스님트</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jua&family=Gowun+Dodum&family=Lilita+One&display=swap">
+<link rel="stylesheet" href="../shared/duo.css">
+<style>
+/* Layout: a marigold barn table — four rows of cards across the middle (the sixth slot glows red), your ten-card hand below. */
+:root {
+  --bg: #f4bf3a;
+  --bg2: #fff7df;
+  --panel: rgba(255, 248, 225, .82);
+  --line: rgba(59, 31, 92, .22);
+  --fg: #2e1748;
+  --muted: #6b5486;
+  --accent: #4b2a7a;
+  --accent-fg: #fff7df;
+  --danger: #d23a3a;
+  --ok: #2e8a4e;
+  --sheet: #fff7df;
+  --scrim: rgba(46, 23, 72, .45);
+  --f-display: "Jua", "Gowun Dodum", sans-serif;
+  --f-body: "Gowun Dodum", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --f-num: "Lilita One", "Jua", sans-serif;
+  --radius: 16px;
+}
+body {
+  background-color: var(--bg);
+  background-image: radial-gradient(circle at 12px 12px, rgba(255, 255, 255, .22) 2px, transparent 2.5px), linear-gradient(180deg, #f8cf55, #efab2a);
+  background-size: 24px 24px, 100% 100%;
+  background-attachment: fixed;
+}
+.duo-title { color: var(--accent); font-size: 24px; }
+.mark-6 { width: 110px; height: 96px; }
+
+/* bull-head classes, like the real cards: 1 lilac · 2 blue · 3 orange · 5 red · 7 magenta */
+.b1 { --k: #6a4fb3; --t: #f0eafe; } .b2 { --k: #2b7bcc; --t: #e3f1fc; } .b3 { --k: #e0860b; --t: #fff1cc; }
+.b5 { --k: #d23a3a; --t: #fde2e2; } .b7 { --k: #9b1f86; --t: #fbdcf4; }
+
+.nm-card { position: relative; width: 100%; aspect-ratio: 5 / 7; border-radius: 9px; background: #fffdf6; border: 2px solid var(--k); box-shadow: 0 3px 0 rgba(46, 23, 72, .25); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; overflow: hidden; }
+.nm-card::before { content: ""; position: absolute; inset: 3px; border-radius: 6px; background: var(--t); z-index: 0; }
+.nm-card > * { position: relative; z-index: 1; }
+.nm-card .n { font-family: var(--f-num); font-size: clamp(16px, 5.4vw, 26px); line-height: 1; color: var(--k); -webkit-text-stroke: .5px rgba(0,0,0,.15); }
+.nm-card .heads { display: flex; flex-wrap: wrap; justify-content: center; gap: 1px; max-width: 90%; }
+.nm-card .heads svg { width: clamp(7px, 2.2vw, 11px); height: auto; color: var(--k); }
+.nm-card .tl { position: absolute; top: 3px; left: 5px; font-family: var(--f-num); font-size: 10px; color: var(--k); }
+.nm-card.new { animation: pop .45s cubic-bezier(.3, 1.6, .5, 1); }
+@keyframes pop { from { transform: scale(.4) rotate(-8deg); opacity: 0; } to { transform: none; opacity: 1; } }
+.nm-back { width: 100%; aspect-ratio: 5 / 7; border-radius: 9px; background: repeating-linear-gradient(45deg, #4b2a7a 0 6px, #5a3590 6px 12px); border: 2px solid #fff7df; display: grid; place-items: center; color: #f4bf3a; }
+.nm-back svg { width: 55%; color: #f4bf3a; }
+
+.nm-strip { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 13px; color: var(--muted); padding: 8px 12px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line); }
+.nm-strip b { color: var(--fg); font-family: var(--f-num); font-size: 16px; font-weight: 400; }
+.nm-strip .bull { display: inline-flex; align-items: center; gap: 3px; }
+.nm-strip .bull svg { width: 14px; color: var(--danger); }
+
+.nm-rows { display: flex; flex-direction: column; gap: 8px; padding: 10px; border-radius: 18px; background: rgba(75, 42, 122, .12); border: 2px solid rgba(75, 42, 122, .18); }
+.nm-row { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)) 34px; gap: 5px; align-items: center; border-radius: 12px; padding: 4px; border: 2px solid transparent; background: none; text-align: left; color: inherit; }
+.nm-row .slot { width: 100%; aspect-ratio: 5 / 7; border-radius: 9px; border: 2px dashed rgba(75, 42, 122, .25); }
+.nm-row .slot.six { border-color: rgba(210, 58, 58, .7); background: repeating-linear-gradient(-45deg, rgba(210, 58, 58, .12) 0 5px, transparent 5px 10px); display: grid; place-items: center; font-family: var(--f-num); color: rgba(210, 58, 58, .8); font-size: 18px; }
+.nm-row .sum { display: flex; flex-direction: column; align-items: center; font-family: var(--f-num); font-size: 15px; color: var(--danger); line-height: 1; }
+.nm-row .sum svg { width: 16px; color: var(--danger); }
+.nm-row.full .slot.six { animation: warn 1.2s ease-in-out infinite; }
+@keyframes warn { 50% { background-color: rgba(210, 58, 58, .25); } }
+button.nm-row { cursor: pointer; border-color: var(--danger); background: rgba(210, 58, 58, .08); }
+button.nm-row:hover { background: rgba(210, 58, 58, .16); }
+.nm-row.target { border-color: var(--accent); background: rgba(75, 42, 122, .12); }
+
+.nm-who { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); flex-wrap: wrap; }
+.nm-who b { font-family: var(--f-display); font-size: 18px; color: var(--fg); font-weight: 400; }
+.nm-who .badge { margin-left: auto; font-size: 12px; padding: 2px 10px; border-radius: 999px; background: var(--accent); color: var(--accent-fg); }
+.nm-who .badge.wait { background: transparent; color: var(--muted); border: 1px solid var(--line); }
+.nm-opp-hand { display: flex; gap: 3px; }
+.nm-opp-hand i { width: 12px; height: 17px; border-radius: 3px; background: #4b2a7a; border: 1px solid #fff7df; }
+
+.nm-hand { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.nm-hand button { padding: 0; border: none; background: none; transition: transform .15s ease; min-width: 0; }
+.nm-hand button.sel { transform: translateY(-8px) rotate(-2deg); }
+.nm-hand button.sel .nm-card { box-shadow: 0 0 0 3px var(--accent), 0 10px 16px rgba(46, 23, 72, .3); }
+.nm-hand button:disabled { cursor: default; }
+.nm-hand button:disabled .nm-card { filter: saturate(.7); }
+.nm-say { margin: 0; text-align: center; font-size: 14px; text-wrap: balance; min-height: 1.5em; }
+.nm-say em { font-style: normal; color: var(--accent); font-weight: 700; }
+.nm-reveal { display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 13px; color: var(--muted); flex-wrap: wrap; }
+.nm-reveal .pc { width: 40px; }
+.nm-reveal .who { display: flex; align-items: center; gap: 6px; }
+.nm-took { color: var(--danger); font-weight: 700; }
+.nm-pick { display: flex; justify-content: center; }
+.nm-pick .duo-btn { max-width: 340px; }
+.rule-cards { display: flex; gap: 6px; }
+.rule-cards .nm-card { width: 46px; }
+@media (max-width: 380px) { .nm-row { grid-template-columns: repeat(6, minmax(0, 1fr)) 28px; gap: 3px; } }
+</style>
+</head>
+<body>
+<div class="duo" id="app"></div>
+<div id="layer"></div>
+<script src="../shared/duo.js"></script>
+<script>
+(() => {
+"use strict";
+const { esc, shuffle, rnd } = DuoUtil;
+
+const bulls = n => n % 55 === 0 ? 7 : n % 11 === 0 ? 5 : n % 10 === 0 ? 3 : n % 5 === 0 ? 2 : 1;
+const HEAD = `<svg viewBox="0 0 40 34" aria-hidden="true"><path fill="currentColor" d="M3 4c3 6 7 8 11 8l-2 4C6 15 2 10 3 4zm34 0c-3 6-7 8-11 8l2 4c6-1 10-6 9-12z"/><ellipse cx="20" cy="18" rx="11" ry="12" fill="currentColor"/><ellipse cx="20" cy="25" rx="7.5" ry="5.5" fill="#fff" opacity=".85"/><circle cx="15.5" cy="15" r="1.8" fill="#fff"/><circle cx="24.5" cy="15" r="1.8" fill="#fff"/><circle cx="17.5" cy="25.5" r="1.3" fill="currentColor"/><circle cx="22.5" cy="25.5" r="1.3" fill="currentColor"/></svg>`;
+const BIG_BULL = `<svg class="mark-6" viewBox="0 0 120 104" aria-hidden="true"><path fill="#4b2a7a" d="M8 14c8 18 22 24 34 24l-6 12C18 47 4 32 8 14zm104 0c-8 18-22 24-34 24l6 12c18-3 32-18 28-36z"/><ellipse cx="60" cy="56" rx="34" ry="38" fill="#4b2a7a"/><ellipse cx="60" cy="78" rx="23" ry="17" fill="#fff7df"/><circle cx="46" cy="48" r="6" fill="#fff7df"/><circle cx="74" cy="48" r="6" fill="#fff7df"/><circle cx="47" cy="49" r="2.6" fill="#2e1748"/><circle cx="75" cy="49" r="2.6" fill="#2e1748"/><circle cx="52" cy="80" r="4" fill="#4b2a7a"/><circle cx="68" cy="80" r="4" fill="#4b2a7a"/><text x="60" y="34" text-anchor="middle" font-family="Lilita One, sans-serif" font-size="22" fill="#f4bf3a">6</text></svg>`;
+
+function cardHTML(n, extra = "") {
+  const b = bulls(n);
+  return `<div class="nm-card b${b} ${extra}" aria-label="${n}번 카드, 소 ${b}마리"><span class="tl">${n}</span><span class="n">${n}</span><span class="heads">${HEAD.repeat(b)}</span></div>`;
+}
+// 숫자 뒤 조사: 끝자리가 0·1·3·6·7·8이면 받침이 있다 (십, 일, 삼, 육, 칠, 팔)
+const jn = (n, a, b) => n + ([0, 1, 3, 6, 7, 8].includes(n % 10) ? a : b);
+const sumBulls = cards => cards.reduce((a, n) => a + bulls(n), 0);
+
+/* ───── rules engine ───── */
+function deal(g) {
+  g.round += 1;
+  const top = g.mode === "pro" ? 24 : 104;
+  const deck = shuffle(Array.from({ length: top }, (_, i) => i + 1));
+  g.rows = [0, 1, 2, 3].map(() => [deck.pop()]);
+  g.hands = [deck.splice(0, 10).sort((a, b) => a - b), deck.splice(0, 10).sort((a, b) => a - b)];
+  g.picks = [null, null]; g.taken = [[], []]; g.queue = []; g.chooser = null;
+  g.phase = "pick"; g.reveal = null;
+  g.log.push(`${g.round}라운드 시작`);
+  return g;
+}
+function bestRow(rows, card) {
+  let best = -1, bestTop = -1;
+  rows.forEach((r, i) => { const t = r[r.length - 1]; if (t < card && t > bestTop) { best = i; bestTop = t; } });
+  return best;
+}
+function process(g, N) {
+  while (g.queue.length) {
+    const q = g.queue[0];
+    const i = bestRow(g.rows, q.card);
+    if (i < 0) { g.phase = "chooseRow"; g.chooser = q.seat; return; }
+    g.queue.shift();
+    const row = g.rows[i];
+    if (row.length >= 5) {
+      g.taken[q.seat].push(...row);
+      g.reveal.took.push({ seat: q.seat, cards: row.slice(), bulls: sumBulls(row) });
+      g.log.push(`${N[q.seat]} 님의 ${jn(q.card, "이", "가")} 6번째 칸에 들어가 ${row.length}장(소 ${sumBulls(row)}마리)을 가져갔어요`);
+      g.rows[i] = [q.card];
+    } else row.push(q.card);
+  }
+  if (!g.hands[0].length && !g.hands[1].length) endRound(g, N);
+  else g.phase = "pick";
+}
+function endRound(g, N) {
+  const pts = [sumBulls(g.taken[0]), sumBulls(g.taken[1])];
+  g.totals = [g.totals[0] + pts[0], g.totals[1] + pts[1]];
+  g.history.push({ round: g.round, pts });
+  g.log.push(`${g.round}라운드 끝 — ${N[0]} 소 ${pts[0]}마리, ${N[1]} 소 ${pts[1]}마리`);
+  g.phase = "roundEnd";
+  if (g.totals[0] >= g.target || g.totals[1] >= g.target) g.over = true;
+}
+
+const game = {
+  id: "6nimmt",
+  title: "젝스님트",
+  mark: BIG_BULL,
+  tagline: "숫자 카드를 동시에 내고 줄에 이어 붙여요. 여섯 번째 카드를 놓는 사람이 소 떼를 떠안아요.",
+  hidden: true,
+  options: [
+    { id: "target", label: "게임이 끝나는 점수", def: 66, choices: [{ v: 66, label: "소 66마리 (정식)" }, { v: 33, label: "소 33마리 (짧게)" }] },
+    { id: "mode", label: "카드", def: "full", choices: [{ v: "full", label: "1~104 전부 (기본)" }, { v: "pro", label: "1~24만 (전략 모드)" }] },
+  ],
+  setup(players, opts) {
+    return deal({ target: +opts.target || 66, mode: opts.mode || "full", round: 0, totals: [0, 0], history: [], log: [], over: false });
+  },
+  apply(g, seat, a, env) {
+    const N = env.names;
+    if (a.type === "pick") {
+      if (g.phase !== "pick" || g.picks[seat] != null) return null;
+      const i = g.hands[seat].indexOf(a.card);
+      if (i < 0) return null;
+      g.hands[seat].splice(i, 1);
+      g.picks[seat] = a.card;
+      if (g.picks[0] != null && g.picks[1] != null) {
+        g.reveal = { picks: g.picks.slice(), took: [] };
+        g.queue = [0, 1].map(s => ({ seat: s, card: g.picks[s] })).sort((x, y) => x.card - y.card);
+        g.log.push(`공개: ${N[0]} ${g.picks[0]} · ${N[1]} ${g.picks[1]}`);
+        g.picks = [null, null];
+        process(g, N);
+      }
+      return g;
+    }
+    if (a.type === "take") {
+      if (g.phase !== "chooseRow" || seat !== g.chooser) return null;
+      const r = g.rows[a.row];
+      if (!r) return null;
+      const q = g.queue.shift();
+      g.taken[seat].push(...r);
+      g.reveal.took.push({ seat, cards: r.slice(), bulls: sumBulls(r) });
+      g.log.push(`${N[seat]} 님의 ${jn(q.card, "이", "가")} 어느 줄보다 작아서 ${r.length}장(소 ${sumBulls(r)}마리)을 가져갔어요`);
+      g.rows[a.row] = [q.card];
+      g.chooser = null;
+      process(g, N);
+      return g;
+    }
+    if (a.type === "next") {
+      if (g.phase !== "roundEnd" || g.over) return null;
+      return deal(g);
+    }
+    return null;
+  },
+  viewer(g) {
+    if (g.phase === "chooseRow") return g.chooser;
+    if (g.phase === "pick") return g.picks[0] == null ? 0 : 1;
+    return 0;
+  },
+  needsCover: g => g.phase === "pick" || g.phase === "chooseRow",
+  coverText(g, ctx) {
+    if (g.phase === "chooseRow") return `${ctx.names[g.chooser]} 님 카드가 어느 줄보다도 작아요. 가져갈 줄을 골라야 해요.`;
+    if (g.picks[0] != null) return `${ctx.names[0]} 님은 카드를 골랐어요. 이제 ${ctx.names[1]} 님이 고를 차례예요.`;
+    const rv = g.reveal; if (!rv) return "";
+    return `지난 공개: ${ctx.names[0]} ${rv.picks[0]} · ${ctx.names[1]} ${rv.picks[1]}` + (rv.took.length ? ` — ${rv.took.map(t => `${ctx.names[t.seat]} 님이 소 ${t.bulls}마리`).join(", ")}` : "");
+  },
+  changed(prev, g, ctx) {
+    if (!g.reveal || prev.reveal === g.reveal) return;
+    if (!g.reveal.took.length || JSON.stringify(prev.reveal) === JSON.stringify(g.reveal)) return;
+    ctx.toast("음매… " + g.reveal.took.map(t => `${ctx.names[t.seat]} 님이 소 ${t.bulls}마리`).join(", ") + "를 데려갔어요");
+  },
+  render(ctx) {
+    const g = ctx.g, N = ctx.names;
+    const me = ctx.me < 0 ? 0 : ctx.me, op = 1 - me, spect = ctx.me < 0;
+    const fresh = new Set(g.reveal ? g.reveal.picks : []);
+    const sel = ctx.ui.sel;
+    const canPick = !spect && g.phase === "pick" && g.picks[me] == null;
+    if (sel != null && (!canPick || !g.hands[me].includes(sel))) ctx.ui.sel = null;
+    const target = canPick && ctx.ui.sel != null ? bestRow(g.rows, ctx.ui.sel) : -2;
+    const choosing = !spect && g.phase === "chooseRow" && g.chooser === me;
+
+    const roundBulls = s => sumBulls(g.taken[s]);
+    const strip = `<div class="nm-strip"><span>${g.round}라운드 · ${g.target}마리면 끝</span>
+      <span class="bull">${HEAD} ${esc(N[me])} <b>${g.totals[me] + roundBulls(me)}</b></span>
+      <span class="bull">${HEAD} ${esc(N[op])} <b>${g.totals[op] + roundBulls(op)}</b></span></div>`;
+
+    const rows = g.rows.map((r, i) => {
+      const slots = [0, 1, 2, 3, 4, 5].map(k => r[k] != null ? cardHTML(r[k], fresh.has(r[k]) ? "new" : "") : `<span class="slot ${k === 5 ? "six" : ""}">${k === 5 ? "6" : ""}</span>`).join("");
+      const sum = `<span class="sum">${HEAD}${sumBulls(r)}</span>`;
+      const cls = `nm-row ${r.length >= 5 ? "full" : ""} ${target === i ? "target" : ""}`;
+      return choosing ? `<button class="${cls}" data-a="take" data-row="${i}" aria-label="${i + 1}번째 줄 가져가기, 소 ${sumBulls(r)}마리">${slots}${sum}</button>` : `<div class="${cls}">${slots}${sum}</div>`;
+    }).join("");
+
+    let reveal = "";
+    if (g.reveal) {
+      reveal = `<div class="nm-reveal"><span>지난 공개</span>${[0, 1].map(s => `<span class="who">${esc(N[s])} <span class="pc">${cardHTML(g.reveal.picks[s])}</span></span>`).join("")}
+        ${g.reveal.took.map(t => `<span class="nm-took">${esc(N[t.seat])} +소 ${t.bulls}</span>`).join("")}</div>`;
+    }
+
+    let say = "";
+    if (g.phase === "pick") {
+      if (spect) say = "두 사람이 카드를 고르는 중";
+      else if (g.picks[me] != null) say = `<em>${jn(g.picks[me], "을", "를")}</em> 냈어요. ${esc(N[op])} 님을 기다리는 중…`;
+      else if (ctx.ui.sel != null) say = target >= 0 ? `<em>${ctx.ui.sel}</em> → ${target + 1}번째 줄로 갈 거예요${g.rows[target].length >= 5 ? " (6번째라 그 줄을 가져와요!)" : ""}. 상대 카드에 따라 달라질 수 있어요.` : `<em>${jn(ctx.ui.sel, "은", "는")}</em> 모든 줄보다 작아요. 내면 줄 하나를 골라 가져와야 해요.`;
+      else say = "낼 카드 한 장을 고르세요. 둘 다 고르면 동시에 공개돼요.";
+    } else if (g.phase === "chooseRow") {
+      say = choosing ? `내 카드 <em>${jn(g.queue[0].card, "이", "가")}</em> 어느 줄보다 작아요. <em>가져갈 줄</em>을 눌러 고르세요.` : `${esc(N[g.chooser])} 님이 가져갈 줄을 고르는 중…`;
+    }
+
+    const oppStatus = g.phase === "pick" ? (g.picks[op] != null ? `<span class="badge">골랐어요</span>` : `<span class="badge wait">고르는 중</span>`) : "";
+    const myStatus = g.phase === "pick" && !spect ? (g.picks[me] != null ? `<span class="badge">골랐어요</span>` : `<span class="badge wait">내 차례</span>`) : "";
+
+    const hand = spect ? "" : `<div class="nm-hand">${g.hands[me].map(n => `<button data-a="card" data-n="${n}" class="${ctx.ui.sel === n ? "sel" : ""}" ${canPick ? "" : "disabled"}>${cardHTML(n)}</button>`).join("")}
+      ${g.picks[me] != null ? `<div>${`<div class="nm-back">${HEAD}</div>`}</div>` : ""}</div>`;
+    const pickBtn = canPick && ctx.ui.sel != null ? `<div class="nm-pick"><button class="duo-btn primary center" data-a="pick"><b>${ctx.ui.sel} 내기</b><span>상대도 고르면 동시에 공개돼요</span></button></div>` : "";
+
+    let roundPanel = "";
+    if (g.phase === "roundEnd") {
+      const h = g.history[g.history.length - 1];
+      const [a, b] = g.totals;
+      roundPanel = `<div class="duo-panel"><h2>${h.round}라운드 결과</h2>
+        <table class="duo-table"><thead><tr><th></th><th>${esc(N[0])}</th><th>${esc(N[1])}</th></tr></thead><tbody>
+        <tr><td>이번 라운드 소</td><td class="num">${h.pts[0]}</td><td class="num">${h.pts[1]}</td></tr>
+        <tr><td><b>누적</b></td><td class="num"><b>${a}</b></td><td class="num"><b>${b}</b></td></tr></tbody></table>
+        ${g.over ? `<p style="margin:0;text-align:center;font-family:var(--f-display);font-size:24px;color:var(--accent)">${a === b ? "무승부!" : `${esc(N[a < b ? 0 : 1])} 님 승리!`} <span style="font-size:15px;color:var(--muted)">소가 적은 사람이 이겨요</span></p>
+          ${spect ? "" : `<div class="duo-row"><button class="duo-btn primary" data-duo="again"><b>한 판 더</b><span>점수를 0부터</span></button><button class="duo-btn" data-duo="lobby"><b>처음 화면</b><span>설정 바꾸기</span></button></div>`}`
+          : (spect ? "" : `<div class="duo-row"><button class="duo-btn primary" data-a="next"><b>다음 라운드</b><span>카드를 새로 10장씩 받아요</span></button></div>`)}</div>`;
+    }
+
+    return `${strip}
+      <div class="nm-who"><b>${esc(N[op])}</b><span class="nm-opp-hand">${g.hands[op].map(() => "<i></i>").join("")}</span><span>· 가져온 소 ${roundBulls(op)}</span>${oppStatus}</div>
+      <div class="nm-rows">${rows}</div>
+      ${reveal}
+      ${roundPanel}
+      <p class="nm-say">${say}</p>
+      <div class="nm-who"><b>${spect ? esc(N[me]) : "나 (" + esc(N[me]) + ")"}</b><span>· 이번 라운드 가져온 소 ${roundBulls(me)}</span>${myStatus}</div>
+      ${hand}${pickBtn}`;
+  },
+  onClick(el, ctx) {
+    const a = el.dataset.a;
+    if (a === "card") { const n = +el.dataset.n; ctx.ui.sel = ctx.ui.sel === n ? null : n; ctx.rerender(); }
+    else if (a === "pick") { const n = ctx.ui.sel; if (n != null && ctx.act({ type: "pick", card: n })) ctx.ui.sel = null; }
+    else if (a === "take") ctx.act({ type: "take", row: +el.dataset.row });
+    else if (a === "next") ctx.act({ type: "next" });
+  },
+  rules: `
+  <p>'젝스 님트'는 독일어로 '6을 가져가!'라는 뜻이에요. 카드에 그려진 소 머리가 벌점이고, 소를 적게 모은 사람이 이겨요.</p>
+  <h3>카드</h3>
+  <p>1부터 104까지 한 장씩. 카드마다 소 머리가 1~7개 그려져 있어요.</p>
+  <div class="rule-cards">${cardHTML(3)}${cardHTML(10)}${cardHTML(15)}${cardHTML(22)}${cardHTML(55)}</div>
+  <p class="sub">5의 배수 2마리, 10의 배수 3마리, 같은 숫자 두 개(11, 22…) 5마리, 55는 7마리, 나머지는 1마리.</p>
+  <h3>준비</h3>
+  <p>각자 10장을 받고, 가운데에 카드 4장을 한 장씩 놓아 4개의 줄을 만들어요.</p>
+  <h3>한 턴</h3>
+  <ol>
+    <li>둘이 <b>동시에</b> 손에서 카드 한 장을 몰래 골라요.</li>
+    <li>함께 공개하고, <b>작은 숫자부터</b> 줄에 붙여요.</li>
+    <li>카드는 <b>끝 카드가 내 카드보다 작은 줄 중, 끝 숫자가 가장 가까운 줄</b> 뒤에 붙어요. 내가 고를 수 없어요.</li>
+    <li>그 줄에 이미 5장이 있다면, 내 카드가 <b>6번째</b>가 되면서 앞의 5장을 모두 가져와요(벌점). 내 카드는 그 줄의 새 첫 카드가 돼요.</li>
+    <li>내 카드가 <b>모든 줄의 끝 카드보다 작으면</b>, 원하는 줄 하나를 통째로 가져오고 내 카드로 새 줄을 시작해요. 보통 소가 적은 줄을 골라요.</li>
+  </ol>
+  <h3>라운드와 게임 끝</h3>
+  <p>10장을 다 내면 라운드가 끝나고, 가져온 카드의 소 머리를 세어 더해요. 누군가 <b>66마리</b>에 닿으면 게임이 끝나고, 소가 <b>적은</b> 사람이 이겨요.</p>
+  <h3>2인 전략 모드</h3>
+  <p>1~24 카드만 쓰면(4장 + 10장씩) 모든 카드가 보이는 셈이라, 상대 손패를 계산하는 머리싸움이 돼요.</p>
+  <h3>이 화면 보는 법</h3>
+  <ul><li>카드를 고르면 그 카드가 들어갈 줄이 보라색으로 표시돼요. 상대 카드가 먼저 들어가면 바뀔 수 있어요.</li>
+  <li>빨간 빗금 칸이 6번째 자리예요. 5장 찬 줄은 깜빡여요.</li></ul>`,
+};
+Duo(game);
+})();
+</script>
+</body>
+</html>
