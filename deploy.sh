@@ -2,7 +2,6 @@
 # 사이트 파일을 gh-pages 브랜치로 올린다 (GitHub Pages가 그 브랜치를 서비스함).
 set -e
 cd "$(dirname "$0")"
-./build.sh
 TMP=$(mktemp -d)
 git fetch -q origin gh-pages
 git worktree add -q "$TMP" origin/gh-pages --detach

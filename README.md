@@ -4,7 +4,7 @@
 
 | 게임 | 폴더 |
 |---|---|
-| 하나비 | `hanabi/` (원본은 `hanabi.html`, `./build.sh`로 생성) |
+| 하나비 | `hanabi/` |
 | 로스트 시티 | `lostcities/` |
 | 젝스님트 | `6nimmt/` |
 | 쿼리도 | `quoridor/` |
