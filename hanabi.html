@@ -191,12 +191,19 @@ input[type=text] { font: inherit; color: var(--ink); background: rgba(0,0,0,.25)
 .over .score { font-family: var(--f-mark); font-size: 72px; line-height: 1; color: var(--gold); text-align: center; text-shadow: 0 0 24px rgba(233,181,79,.5); }
 .over .rank { text-align: center; font-family: var(--f-head); font-size: 18px; }
 
-.toast { position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 70; background: var(--night-2); border: 1px solid var(--gold); color: var(--ink); padding: 8px 16px; border-radius: 999px; font-size: 13.5px; white-space: nowrap; max-width: calc(100% - 32px); overflow: hidden; text-overflow: ellipsis; }
+.toast { pointer-events: none; position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 70; background: var(--night-2); border: 1px solid var(--gold); color: var(--ink); padding: 8px 16px; border-radius: 999px; font-size: 13.5px; white-space: nowrap; max-width: calc(100% - 32px); overflow: hidden; text-overflow: ellipsis; }
 .shake { animation: shake .45s ease; }
 @keyframes shake { 0%,100% { transform: translateX(0); } 20% { transform: translateX(-7px); } 40% { transform: translateX(6px); } 60% { transform: translateX(-4px); } 80% { transform: translateX(3px); } }
 .flash { position: fixed; inset: 0; z-index: 55; pointer-events: none; background: radial-gradient(circle, rgba(255,80,80,.0) 30%, rgba(255,60,60,.35)); animation: flash .7s ease forwards; }
 @keyframes flash { from { opacity: 1; } to { opacity: 0; } }
 
+.roomhead { display: flex; align-items: center; gap: 10px; justify-content: space-between; }
+.roomhead.small { margin-top: -4px; }
+.code { font-family: var(--f-mark); font-size: 44px; letter-spacing: .25em; color: var(--gold); text-align: center; line-height: 1.1; text-shadow: 0 0 18px rgba(233,181,79,.4); }
+.sharebox { display: flex; gap: 8px; align-items: center; }
+.sharebox input { flex: 1; min-width: 0; font-size: 12.5px; }
+.conn { font-size: 12px; padding: 2px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.conn.ok { border-color: var(--c-g); color: var(--c-g); }
 .log { display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; }
 .log div { padding-bottom: 6px; border-bottom: 1px solid var(--line); }
 .rulecards { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -392,6 +399,8 @@ const ui = {
   mode: store.get("hanabi-mode", null),      // "online" | "local"
   name: store.get("hanabi-name", ""),
   db: null, ref: null, dbReady: false, dbChecked: false, canWrite: true,
+  net: null,                                  // "db" (Claude artifact) | "peer" (room code) | null
+  room: null, isHost: false, peer: null, conn: null, peerStatus: "idle",
   myId: null,
   online: null,                               // latest table doc
   local: store.get("hanabi-local", null),     // local game state
@@ -413,14 +422,14 @@ async function boot() {
   ui.myId = localId();
   render();
   const claude = window.claude;
-  if (!claude || typeof claude.use !== "function") { ui.dbChecked = true; ui.mode = "local"; render(); return; }
+  if (!claude || typeof claude.use !== "function") { bootPeer(); return; }
   try {
     const [db, user] = await Promise.all([claude.use("db"), claude.use("user").catch(() => null)]);
     if (user) { try { const uid = await user.id(); if (uid) ui.myId = "u-" + uid; } catch {} }
     if (user) { try { const w = await user.can("data.write"); if (w === false) ui.canWrite = false; } catch {} }
     ui.dbChecked = true;
     if (!db) { ui.mode = "local"; render(); return; }
-    ui.db = db;
+    ui.db = db; ui.net = "db";
     ui.ref = db.doc(DOC_PATH);
     if (!ui.mode) ui.mode = "online";
     ui.ref.onSnapshot(snap => {
@@ -456,6 +465,14 @@ async function commit(next) {
     render();
     return;
   }
+  if (ui.net === "peer") {
+    const prev = ui.online;
+    ui.online = next; saveRoom(); ui.sheet = null;
+    send({ t: "sync", state: next });
+    maybeAnimate("online", next, prev);
+    render();
+    return;
+  }
   if (ui.busy) return;
   ui.busy = true; ui.sheet = null;
   try { await ui.ref.set(next); ui.error = ""; }
@@ -469,12 +486,197 @@ async function commit(next) {
   ui.busy = false; render();
 }
 
+/* ───────── room-code play (outside Claude): PeerJS ───────── */
+const PEER_PREFIX = "sw3-hanabi-";
+const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const params = new URLSearchParams(location.search);
+function peerOptions() {
+  const o = { debug: 0, config: { iceServers: [
+    { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] },
+    { urls: ["turn:openrelay.metered.ca:80", "turn:openrelay.metered.ca:443", "turn:openrelay.metered.ca:443?transport=tcp"], username: "openrelayproject", credential: "openrelayproject" },
+  ] } };
+  const ps = params.get("peerserver");               // e.g. localhost:9000 (테스트용)
+  if (ps) { const [host, port] = ps.split(":"); Object.assign(o, { host, port: +port || 443, path: "/", secure: location.protocol === "https:" && !/^localhost$|^127\./.test(host) }); }
+  return o;
+}
+function loadPeerLib() {
+  if (window.Peer) return Promise.resolve();
+  const tryLoad = src => new Promise((res, rej) => { const sc = document.createElement("script"); sc.src = src; sc.onload = res; sc.onerror = rej; document.head.appendChild(sc); });
+  return tryLoad("vendor/peerjs.min.js").catch(() => tryLoad("https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"));
+}
+function bootPeer() {
+  ui.dbChecked = true;
+  if (!window.RTCPeerConnection) { ui.mode = "local"; render(); return; }
+  ui.net = "peer";
+  const urlRoom = (params.get("r") || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
+  const saved = store.get("hanabi-room", null);
+  if (urlRoom) {
+    ui.mode = "online";
+    if (saved && saved.code === urlRoom && ui.name) openRoom(saved.code, saved.host);
+    else ui.joinCode = urlRoom;
+  } else {
+    if (!ui.mode) ui.mode = "online";
+    if (saved && ui.mode === "online" && ui.name) openRoom(saved.code, saved.host);
+  }
+  render();
+}
+function newCode() { let c = ""; for (let i = 0; i < 5; i++) c += CODE_CHARS[rnd(CODE_CHARS.length)]; return c; }
+function saveRoom() { if (ui.room) store.set("hanabi-room-" + ui.room, ui.online); }
+function shareLink() { return location.origin + location.pathname + "?r=" + ui.room; }
+let retryTimer = null;
+function retry(ms) { clearTimeout(retryTimer); retryTimer = setTimeout(() => { if (ui.room) startPeer(); }, ms); }
+async function openRoom(code, host) {
+  ui.room = code; ui.isHost = host; ui.error = "";
+  store.set("hanabi-room", { code, host });
+  ui.online = store.get("hanabi-room-" + code, null);
+  if (host && !ui.online) { ui.online = { v: 1, status: "lobby", players: [{ id: ui.myId, name: ui.name }], seq: 1 }; saveRoom(); }
+  ui.seenSeq.online = ui.online ? ui.online.seq : null;
+  ui.peerStatus = "opening"; render();
+  try { await loadPeerLib(); } catch { ui.peerStatus = "error"; ui.error = "연결 모듈을 불러오지 못했어요. 인터넷 연결을 확인하고 새로고침해 주세요."; render(); return; }
+  startPeer();
+}
+function leaveRoom() {
+  clearTimeout(retryTimer);
+  try { ui.conn && ui.conn.close(); } catch {}
+  try { ui.peer && ui.peer.destroy(); } catch {}
+  ui.peer = ui.conn = null; ui.room = null; ui.online = null; ui.peerStatus = "idle"; ui.joinCode = "";
+  store.set("hanabi-room", null);
+  if (params.get("r")) history.replaceState(null, "", location.pathname + (params.get("peerserver") ? "?peerserver=" + params.get("peerserver") : ""));
+  params.delete("r");
+  render();
+}
+function startPeer() {
+  if (!ui.room) return;
+  try { ui.peer && ui.peer.destroy(); } catch {}
+  ui.conn = null;
+  const host = ui.isHost;
+  const peer = host ? new Peer(PEER_PREFIX + ui.room, peerOptions()) : new Peer(peerOptions());
+  ui.peer = peer;
+  peer.on("open", () => {
+    if (ui.peer !== peer) return;
+    if (host) { ui.peerStatus = "waiting"; render(); }
+    else connectToHost();
+  });
+  peer.on("connection", conn => { if (host && ui.peer === peer) attach(conn); });
+  peer.on("disconnected", () => { if (ui.peer === peer && !peer.destroyed) { try { peer.reconnect(); } catch {} } });
+  peer.on("error", err => {
+    if (ui.peer !== peer) return;
+    const t = err && err.type;
+    if (t === "peer-unavailable") { ui.peerStatus = "nohost"; render(); retry(3000); }
+    else if (t === "unavailable-id") { ui.peerStatus = "opening"; render(); retry(4000); }   // 새로고침 직후엔 이전 연결이 잠깐 남아 있음
+    else if (t === "browser-incompatible") { ui.peerStatus = "error"; ui.error = "이 브라우저는 온라인 연결을 지원하지 않아요. 크롬이나 사파리로 열어 주세요."; render(); }
+    else { ui.peerStatus = ui.conn ? ui.peerStatus : "lost"; render(); if (!ui.conn) retry(5000); }
+  });
+}
+function connectToHost() {
+  if (!ui.peer || ui.peer.destroyed) return;
+  const peer = ui.peer;
+  const conn = peer.connect(PEER_PREFIX + ui.room, { reliable: true });
+  attach(conn);
+  setTimeout(() => { if (!conn.open && !conn._opened && ui.peer === peer && !peer.destroyed && !ui.conn) { try { conn.close(); } catch {} ui.peerStatus = "nohost"; render(); connectToHost(); } }, 12000);
+}
+function attach(conn) {
+  conn.on("open", () => {
+    conn._opened = true;
+    if (ui.conn && ui.conn !== conn) { try { ui.conn.close(); } catch {} }
+    ui.conn = conn; ui.peerStatus = "connected"; ui.error = "";
+    conn.send({ t: "hello", id: ui.myId, name: ui.name, state: ui.online });
+    render();
+  });
+  conn.on("data", m => { if (ui.conn === conn) onPeerMsg(m); });
+  const gone = () => {
+    if (ui.conn !== conn) return;
+    ui.conn = null; ui.peerStatus = ui.isHost ? "waiting" : "lost"; render();
+    if (!ui.isHost) retry(2500);
+  };
+  conn.on("close", gone); conn.on("error", gone);
+}
+function send(m) { try { if (ui.conn && ui.conn.open) ui.conn.send(m); } catch {} }
+function adopt(st) {
+  if (!st || typeof st !== "object" || typeof st.seq !== "number") return false;
+  if (ui.online && st.seq < ui.online.seq) return false;
+  if (ui.online && st.seq === ui.online.seq && (ui.isHost || JSON.stringify(st) === JSON.stringify(ui.online))) return false;  // 같은 순번이 엇갈리면 방장 쪽이 기준
+  const prev = ui.online;
+  ui.online = clone(st); saveRoom();
+  if (ui.sheet && ui.sheet.kind !== "rules" && ui.sheet.kind !== "log") ui.sheet = null;
+  maybeAnimate("online", ui.online, prev);
+  return true;
+}
+function onPeerMsg(m) {
+  if (!m || typeof m !== "object") return;
+  if (m.t === "hello") {
+    adopt(m.state);
+    if (ui.isHost) {
+      const s = ui.online ? clone(ui.online) : { v: 1, status: "lobby", players: [{ id: ui.myId, name: ui.name }], seq: 1 };
+      const name = String(m.name || "상대").slice(0, 12);
+      const i = s.players.findIndex(p => p.id === m.id);
+      if (i < 0) {
+        if (s.status !== "lobby" || s.players.length >= 2) { send({ t: "full" }); render(); return; }
+        s.players.push({ id: String(m.id), name }); s.seq += 1;
+      } else if (s.status === "lobby" && s.players[i].name !== name) { s.players[i].name = name; s.seq += 1; }
+      ui.online = s; saveRoom();
+    }
+    send({ t: "sync", state: ui.online });
+    render();
+  } else if (m.t === "sync") {
+    if (adopt(m.state)) render();
+    else if (ui.isHost && m.state && ui.online && m.state.seq === ui.online.seq) send({ t: "sync", state: ui.online });
+  }
+  else if (m.t === "full") { ui.peerStatus = "full"; render(); }
+}
+function connPill() {
+  if (ui.net !== "peer") return "";
+  const st = ui.peerStatus;
+  const txt = st === "connected" ? "연결됨" : st === "waiting" ? "상대를 기다리는 중" : st === "nohost" ? "방장을 찾는 중" : st === "lost" ? "다시 연결하는 중" : st === "full" ? "방이 가득 찼어요" : st === "error" ? "연결 안 됨" : "연결 준비 중";
+  return `<span class="conn ${st === "connected" ? "ok" : ""}" role="status">${txt}</span>`;
+}
+function roomEntryHTML() {
+  return `<div class="lobby">${heroHTML()}
+    <div class="panel">${modeTabs()}
+      <h2>방 만들고 코드로 들어오기</h2>
+      <label class="fld" for="name-in">내 이름<input type="text" id="name-in" maxlength="12" placeholder="예: 지우" value="${esc(ui.name)}"></label>
+      ${ui.joinCode ? "" : `<div class="row"><button class="btn primary" data-act="room-create"><b>방 만들기</b><span>코드와 링크가 나와요. 상대에게 보내 주세요</span></button></div>`}
+      <label class="fld" for="code-in">${ui.joinCode ? "받은 방 코드" : "받은 코드가 있다면"}<input type="text" id="code-in" maxlength="6" autocapitalize="characters" placeholder="예: K7QX2" value="${esc(ui.joinCode || "")}" style="text-transform:uppercase;letter-spacing:.2em"></label>
+      <div class="row"><button class="btn ${ui.joinCode ? "primary" : ""}" data-act="room-join"><b>이 코드로 들어가기</b><span>상대가 만든 방에 앉아요</span></button></div>
+      ${ui.error ? `<p class="err">${esc(ui.error)}</p>` : ""}
+      <p class="note">방을 만든 사람의 화면이 테이블 역할을 해요. 게임 중에 그 사람이 페이지를 닫으면 잠깐 멈췄다가, 다시 열면 이어서 할 수 있어요.</p>
+    </div>
+    <div class="row"><button class="btn" data-act="rules"><b>규칙 보기</b><span>처음이라면 3분이면 충분해요</span></button></div>
+  </div>`;
+}
+function peerLobbyHTML(s) {
+  const players = (s && s.players) || [];
+  const seats = [0, 1].map(i => {
+    const p = players[i];
+    return `<div class="seat ${p ? "filled" : ""}"><div class="tag">${i === 0 ? "방장" : "손님"}${p && p.id === ui.myId ? " · 나" : ""}</div><div class="who">${p ? esc(p.name) : "빈 자리"}</div></div>`;
+  }).join("");
+  const ready = players.length === 2 && players.some(p => p.id === ui.myId);
+  let action;
+  if (ui.peerStatus === "full") action = `<p class="err">이 방은 이미 두 사람이 앉아 있어요. 코드를 다시 확인해 주세요.</p>`;
+  else if (ready) action = `<div class="row"><button class="btn primary" data-act="start" ${ui.peerStatus === "connected" ? "" : "disabled"}><b>불꽃놀이 시작</b><span>${ui.peerStatus === "connected" ? "카드를 섞고 5장씩 나눠요" : "상대와 다시 연결되면 시작할 수 있어요"}</span></button></div>`;
+  else if (ui.isHost) action = `<p class="note">아래 링크나 코드를 상대에게 보내 주세요. 상대가 들어오면 자리에 이름이 떠요.</p>`;
+  else action = `<p class="note">${ui.peerStatus === "nohost" ? "방을 찾고 있어요. 방을 만든 사람이 페이지를 열어 두었는지 확인해 주세요." : "방에 연결하는 중…"}</p>`;
+  return `<div class="lobby">${heroHTML()}
+    <div class="panel">
+      <div class="roomhead"><h2>방 코드</h2>${connPill()}</div>
+      <div class="code">${esc(ui.room)}</div>
+      ${ui.isHost ? `<div class="sharebox"><input type="text" id="share-link" readonly value="${esc(shareLink())}" aria-label="초대 링크"><button class="iconbtn" data-act="copy">링크 복사</button></div>` : ""}
+      <div class="seats">${seats}</div>
+      ${action}
+      ${ui.error ? `<p class="err">${esc(ui.error)}</p>` : ""}
+    </div>
+    <div class="row"><button class="btn" data-act="rules"><b>규칙 보기</b><span>처음이라면 3분이면 충분해요</span></button>
+      <button class="btn warn" data-act="room-leave" data-key="room-leave"><b>${ui.armed === "room-leave" ? "정말 나갈까요? 한 번 더 누르기" : "방 나가기"}</b><span>다른 방을 만들거나 들어가요</span></button></div>
+  </div>`;
+}
+
 /* ───────── rendering ───────── */
 function render() {
   const app = $("#app");
   const s = current();
   let html = "";
-  if (ui.mode === "online" && !ui.db) html = ui.dbChecked ? lobbyLocalHTML() : loadingHTML();
+  if (ui.mode === "online" && ui.net === "peer") html = !ui.room ? roomEntryHTML() : (!s || s.status === "lobby") ? peerLobbyHTML(s) : tableHTML(s);
+  else if (ui.mode === "online" && !ui.db) html = ui.dbChecked ? lobbyLocalHTML() : loadingHTML();
   else if (ui.mode === "online") html = (!ui.dbReady) ? loadingHTML() : (!s || s.status === "lobby") ? lobbyOnlineHTML(s) : tableHTML(s);
   else html = (!s) ? lobbyLocalHTML() : tableHTML(s);
   app.innerHTML = html;
@@ -525,7 +727,7 @@ function lobbyOnlineHTML(s) {
 }
 function lobbyLocalHTML() {
   const n = ui.localNames;
-  const noOnline = ui.dbChecked && !ui.db;
+  const noOnline = ui.dbChecked && !ui.net;
   return `<div class="lobby">${heroHTML()}
     <div class="panel">${noOnline ? "" : modeTabs()}
       <h2>한 폰으로 같이 하기</h2>
@@ -594,6 +796,7 @@ function tableHTML(s) {
     <button class="iconbtn" data-act="log">기록</button>
     <button class="iconbtn" data-act="rules">규칙</button>
     <button class="iconbtn" data-act="menu" aria-label="메뉴">⋯</button></div>
+  ${ui.net === "peer" && ui.mode === "online" ? `<div class="roomhead small"><span class="note">방 ${esc(ui.room)}</span>${connPill()}</div>` : ""}
   ${status}
   <section class="side" aria-label="상대 손패">
     <div class="side-head"><b>${esc(spectator ? P[partner].name : P[partner].name)}</b><span>${spectator ? "의 카드" : "의 카드 · 아래는 상대가 아는 정보"}</span>${s.turn === partner && s.status === "playing" ? `<span class="turnpill">차례</span>` : ""}</div>
@@ -655,9 +858,10 @@ function sheetHTML(sh, s) {
     const k = ui.armed;
     return wrapSheet(`<h2>메뉴</h2>
       <div class="row" style="flex-direction:column">
-        <button class="btn" data-act="mode" data-v="${ui.mode === "online" ? "local" : "online"}" ${(!ui.db && ui.mode === "local") ? "disabled" : ""}><b>${ui.mode === "online" ? "한 폰 모드로 바꾸기" : "온라인 모드로 바꾸기"}</b><span>지금 판은 그대로 남아 있어요</span></button>
+        <button class="btn" data-act="mode" data-v="${ui.mode === "online" ? "local" : "online"}" ${(!ui.net && ui.mode === "local") ? "disabled" : ""}><b>${ui.mode === "online" ? "한 폰 모드로 바꾸기" : "온라인 모드로 바꾸기"}</b><span>지금 판은 그대로 남아 있어요</span></button>
         <button class="btn warn" data-act="restart" data-key="restart"><b>${k === "restart" ? "정말 새로 시작할까요? 한 번 더 누르기" : "이 판 그만두고 새 게임"}</b><span>같은 두 사람으로 카드를 다시 섞어요</span></button>
         <button class="btn warn" data-act="tolobby" data-key="tolobby"><b>${k === "tolobby" ? "정말 나갈까요? 한 번 더 누르기" : "처음 화면으로"}</b><span>${ui.mode === "online" ? "자리를 다시 정해요 (상대도 함께 이동)" : "이름을 다시 정해요"}</span></button>
+        ${ui.net === "peer" && ui.mode === "online" && ui.room ? `<button class="btn warn" data-act="room-leave" data-key="room-leave"><b>${k === "room-leave" ? "정말 나갈까요? 한 번 더 누르기" : "방 나가기"}</b><span>이 방을 떠나요. 같은 코드로 다시 들어올 수 있어요</span></button>` : ""}
       </div>`, "메뉴");
   }
   if (!s) return "";
@@ -754,6 +958,22 @@ document.addEventListener("click", e => {
   switch (act) {
     case "mode": ui.mode = el.dataset.v; store.set("hanabi-mode", ui.mode); ui.sheet = null; ui.error = ""; ui.localGate = true; render(); break;
     case "rules": ui.sheet = { kind: "rules" }; render(); break;
+    case "room-create": case "room-join": {
+      const nm = ($("#name-in").value || "").trim().slice(0, 12);
+      if (!nm) { toast("이름을 먼저 적어 주세요"); $("#name-in").focus(); return; }
+      ui.name = nm; store.set("hanabi-name", nm);
+      if (act === "room-create") { openRoom(newCode(), true); break; }
+      const code = ($("#code-in").value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+      if (code.length < 4) { toast("방 코드를 확인해 주세요"); $("#code-in").focus(); return; }
+      openRoom(code, false); break;
+    }
+    case "room-leave": ui.sheet = null; leaveRoom(); break;
+    case "copy": {
+      const link = shareLink(), inp = $("#share-link");
+      const fallback = () => { if (inp) { inp.focus(); inp.select(); } toast("링크를 길게 눌러 복사해 주세요"); };
+      try { navigator.clipboard.writeText(link).then(() => toast("링크를 복사했어요. 카톡으로 보내 주세요"), fallback); } catch { fallback(); }
+      break;
+    }
     case "log": ui.sheet = { kind: "log" }; render(); break;
     case "menu": ui.sheet = { kind: "menu" }; render(); break;
     case "closesheet": ui.sheet = null; render(); break;
@@ -817,7 +1037,7 @@ document.addEventListener("pointerover", e => { const b = e.target.closest("[dat
 document.addEventListener("focusin", e => { const b = e.target.closest("[data-prev]"); if (b) previewFrom(b); });
 document.addEventListener("keydown", e => {
   if (e.key === "Escape" && ui.sheet) { ui.sheet = null; render(); }
-  if (e.key === "Enter" && e.target.id === "name-in") { const b = $('[data-act="sit"]'); if (b) b.click(); }
+  if (e.key === "Enter" && (e.target.id === "name-in" || e.target.id === "code-in")) { const b = $('[data-act="sit"]') || (e.target.id === "code-in" || ui.joinCode ? $('[data-act="room-join"]') : $('[data-act="room-create"]')); if (b) b.click(); }
 });
 
 let toastTimer;
