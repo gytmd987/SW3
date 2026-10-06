@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>스플렌더 대결</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nanum+Myeongjo:wght@700;800&family=Gowun+Dodum&family=Cinzel:wght@700;800&display=swap">
+<link rel="stylesheet" href="../shared/duo.css">
+<style>
+/* Layout: an oxblood velvet table — rival's purse on top, the royal court and three card rows, then the 5×5 gem board, your purse and reserved cards at the bottom. */
+:root {
+  color-scheme: dark;
+  --bg: #2a0b14;
+  --bg2: #3a1220;
+  --panel: rgba(255, 230, 200, .06);
+  --line: rgba(217, 180, 90, .25);
+  --fg: #f6ead6;
+  --muted: #c9a98f;
+  --accent: #d9b45a;
+  --accent-fg: #2a0b14;
+  --danger: #ff7a6b;
+  --ok: #8fe0a8;
+  --sheet: #3a1220;
+  --scrim: rgba(15, 3, 8, .62);
+  --f-display: "Nanum Myeongjo", serif;
+  --f-body: "Gowun Dodum", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --f-num: "Cinzel", "Nanum Myeongjo", Georgia, serif;
+  --ivory: #f7efdf;
+  --W: #f1ede4; --U: #2f6fd6; --G: #26a065; --R: #d6413a; --K: #34323d; --P: #f0c7dc; --A: #e7b93b; --X: #9b7ede;
+}
+body {
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(100% 60% at 50% 0%, rgba(120, 30, 50, .55), transparent 70%),
+    repeating-linear-gradient(135deg, rgba(255, 255, 255, .012) 0 2px, transparent 2px 5px);
+  background-attachment: fixed;
+}
+.duo-title { font-weight: 800; color: var(--accent); }
+.mark-sd { width: 150px; height: 90px; }
+
+.c-W { --c: var(--W); --t: #2a2a2a; } .c-U { --c: var(--U); --t: #fff; } .c-G { --c: var(--G); --t: #fff; } .c-R { --c: var(--R); --t: #fff; }
+.c-K { --c: var(--K); --t: #fff; } .c-P { --c: var(--P); --t: #5a2440; } .c-A { --c: var(--A); --t: #4a3000; } .c-X { --c: var(--X); --t: #fff; }
+
+/* tokens */
+.tk { width: 100%; aspect-ratio: 1; border-radius: 50%; display: grid; place-items: center; background: radial-gradient(circle at 35% 30%, rgba(255,255,255,.55), transparent 40%), var(--c); box-shadow: inset 0 -3px 0 rgba(0,0,0,.25), 0 2px 4px rgba(0,0,0,.5), 0 0 0 2px rgba(217, 180, 90, .55); }
+.tk svg { width: 58%; }
+.c-K.tk { box-shadow: inset 0 -3px 0 rgba(0,0,0,.4), 0 2px 4px rgba(0,0,0,.5), 0 0 0 2px #c9c6d6; }
+
+.sd-board-wrap { display: flex; gap: 10px; align-items: stretch; }
+.sd-board { flex: 1; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; padding: 10px; border-radius: 16px; background: radial-gradient(circle at 50% 50%, #4a1828, #2a0b14); box-shadow: inset 0 0 0 2px rgba(217, 180, 90, .45), inset 0 0 30px rgba(0,0,0,.5); max-width: 330px; margin: 0 auto; }
+.sd-cell { aspect-ratio: 1; border: none; padding: 0; background: rgba(0, 0, 0, .25); border-radius: 50%; box-shadow: inset 0 2px 4px rgba(0,0,0,.6); position: relative; }
+.sd-cell.sel .tk { box-shadow: 0 0 0 3px #fff, 0 0 14px #fff; transform: scale(1.06); }
+.sd-cell.hint .tk { animation: pulse 1s ease-in-out infinite; }
+@keyframes pulse { 50% { box-shadow: 0 0 0 3px var(--accent), 0 0 16px var(--accent); } }
+.sd-cell.last::after { content: ""; position: absolute; inset: -3px; border-radius: 50%; border: 1.5px dashed var(--accent); }
+.sd-cell:disabled { cursor: default; }
+.sd-side { display: flex; flex-direction: column; gap: 8px; justify-content: center; align-items: center; font-size: 12px; color: var(--muted); min-width: 64px; }
+.sd-bag { width: 54px; height: 60px; display: grid; place-items: center; font-family: var(--f-num); font-size: 22px; color: var(--fg); background: radial-gradient(circle at 50% 70%, #6a2a3a, #3a1220); border-radius: 40% 40% 30% 30%; box-shadow: inset 0 0 0 2px rgba(217, 180, 90, .5); }
+.sd-scrolls { display: flex; gap: 3px; }
+
+.sd-row { display: grid; grid-template-columns: 34px repeat(5, minmax(0, 1fr)); gap: 5px; align-items: stretch; }
+.sd-deck { border: none; padding: 0; border-radius: 6px; display: grid; place-items: center; font-family: var(--f-num); font-size: 15px; color: var(--accent); background: repeating-linear-gradient(45deg, #4a1828 0 4px, #3a1220 4px 8px); box-shadow: inset 0 0 0 1.5px rgba(217, 180, 90, .5); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; line-height: 1; }
+.sd-deck small { font-size: 11px; color: var(--muted); font-family: var(--f-body); }
+.sd-deck:disabled { opacity: .4; }
+
+/* jewel cards */
+.cd { position: relative; border: none; padding: 0; width: 100%; aspect-ratio: 5 / 7; border-radius: 7px; background: var(--ivory); color: #2a1a10; overflow: hidden; text-align: left; box-shadow: 0 2px 6px rgba(0,0,0,.45); min-width: 0; }
+.cd .band { position: absolute; inset: 0 0 auto 0; height: 30%; background: var(--c); box-shadow: inset 0 -6px 10px rgba(0,0,0,.18); }
+.cd.c-W .band { background: linear-gradient(180deg, #ffffff, #dcd6c8); }
+.cd.c-X .band { background: linear-gradient(90deg, var(--W), var(--U), var(--G), var(--R), var(--K)); }
+.cd .pts { position: absolute; top: 2px; left: 4px; font-family: var(--f-num); font-weight: 800; font-size: 17px; line-height: 1; color: var(--t); text-shadow: 0 1px 1px rgba(0,0,0,.35); }
+.cd.c-W .pts { text-shadow: none; }
+.cd .gem { position: absolute; top: 3px; right: 3px; width: 30%; }
+.cd .meta { position: absolute; top: 31%; left: 3px; right: 3px; display: flex; gap: 2px; align-items: center; justify-content: space-between; font-size: 9px; color: #6a4a2a; }
+.cd .crw { display: inline-flex; align-items: center; gap: 1px; font-family: var(--f-num); font-weight: 700; font-size: 12px; color: #9a6a10; }
+.cd .crw svg { width: 12px; }
+.cd .ab { font-size: 9px; padding: 0 3px; border-radius: 3px; background: #2a0b14; color: var(--accent); white-space: nowrap; }
+.cd .cost { position: absolute; left: 3px; right: 3px; bottom: 3px; display: flex; flex-wrap: wrap-reverse; gap: 2px; }
+.cd .cost span { width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; font-family: var(--f-num); font-weight: 700; font-size: 12px; background: var(--c); color: var(--t); box-shadow: 0 0 0 1px rgba(0,0,0,.25); }
+.cd .cost span.short { box-shadow: 0 0 0 1.5px var(--danger); }
+.cd.can { box-shadow: 0 0 0 2.5px var(--ok), 0 2px 8px rgba(0,0,0,.5); }
+.cd.new { animation: deal .5s ease-out; }
+@keyframes deal { from { transform: translateY(-10px) rotate(-3deg); opacity: 0; } }
+.cd:disabled { cursor: default; }
+.sd-cards { display: flex; flex-direction: column; gap: 6px; }
+
+.sd-royals { display: flex; gap: 6px; align-items: center; justify-content: space-between; }
+.sd-royals .list { display: flex; gap: 6px; }
+.roy { width: 46px; aspect-ratio: 5 / 6; border-radius: 6px; border: none; padding: 0; background: linear-gradient(160deg, #f3dd9a, #c99a33); color: #3a2400; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: var(--f-num); font-weight: 700; font-size: 18px; line-height: 1; box-shadow: 0 2px 5px rgba(0,0,0,.5); position: relative; }
+.roy svg { width: 22px; }
+.roy small { font-family: var(--f-body); font-size: 9px; font-weight: 400; }
+.roy:disabled { cursor: default; }
+.roy.pick { box-shadow: 0 0 0 3px #fff, 0 0 16px var(--accent); animation: pulse 1s ease-in-out infinite; }
+
+/* purses */
+.sd-purse { border: 1px solid var(--line); border-radius: 14px; background: var(--panel); padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+.sd-purse.turn { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.sd-ph { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.sd-ph b { font-family: var(--f-display); font-size: 16px; }
+.sd-stat { display: inline-flex; align-items: center; gap: 3px; font-family: var(--f-num); font-weight: 700; font-size: 17px; }
+.sd-stat svg { width: 16px; }
+.sd-stat small { font-family: var(--f-body); font-weight: 400; font-size: 11px; color: var(--muted); }
+.sd-ph .turnpill { margin-left: auto; font-size: 12px; padding: 1px 10px; border-radius: 999px; background: var(--accent); color: var(--accent-fg); }
+.sd-wallet { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 5px; }
+.sd-w { display: flex; flex-direction: column; align-items: center; gap: 2px; border: none; background: none; padding: 0; color: inherit; min-width: 0; }
+.sd-w .tk { width: 74%; }
+.sd-w .n { font-family: var(--f-num); font-weight: 700; font-size: 15px; line-height: 1; }
+.sd-w .b { font-size: 10.5px; color: var(--muted); white-space: nowrap; }
+.sd-w .b em { font-style: normal; color: var(--fg); }
+.sd-w.zero .tk { opacity: .28; }
+.sd-w.pick .tk { box-shadow: 0 0 0 3px #fff, 0 0 12px #fff; }
+.sd-w:disabled { cursor: default; }
+.sd-res { display: grid; grid-template-columns: repeat(3, minmax(0, 72px)); gap: 6px; align-items: start; }
+.sd-res .lbl { font-size: 11px; color: var(--muted); }
+.sd-say { margin: 0; text-align: center; font-size: 14px; min-height: 1.5em; text-wrap: balance; }
+.sd-say em { font-style: normal; color: var(--accent); }
+.sd-say .bad { color: var(--danger); }
+.sd-act { display: flex; gap: 8px; flex-wrap: wrap; }
+.sd-act .duo-btn { flex: 1 1 140px; }
+.sd-sheet-card { display: flex; gap: 14px; align-items: flex-start; }
+.sd-sheet-card .cd { width: 110px; flex: none; }
+.sd-sheet-card .cd .pts { font-size: 28px; }
+.sd-sheet-card .cd .cost span { width: 24px; height: 24px; font-size: 16px; }
+.sd-sheet-card .info { display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; min-width: 0; }
+.sd-jk { display: flex; gap: 6px; flex-wrap: wrap; }
+.sd-jk button { width: 44px; border: none; background: none; padding: 0; }
+.sd-jk button[aria-pressed=true] .tk { box-shadow: 0 0 0 3px #fff, 0 0 12px #fff; }
+.sd-jk button:disabled { opacity: .3; }
+.rule-ab { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; font-size: 13.5px; }
+.rule-ab span:nth-child(odd) { color: var(--accent); white-space: nowrap; }
+@media (max-width: 380px) { .sd-row { grid-template-columns: 28px repeat(5, minmax(0, 1fr)); gap: 4px; } .cd .cost span { width: 14px; height: 14px; font-size: 10.5px; } }
+</style>
+</head>
+<body>
+<div class="duo" id="app"></div>
+<div id="layer"></div>
+<script src="../shared/duo.js"></script>
+<script src="engine.js"></script>
+<script>
+(() => {
+"use strict";
+const { esc, rnd } = DuoUtil;
+const E = window.SDE;
+const { GEMS, TOK, NAME } = E;
+
+const GEM_SVG = `<svg viewBox="0 0 24 22" aria-hidden="true"><path d="M6 1 H18 L23 7 L12 21 L1 7Z" fill="rgba(255,255,255,.18)" stroke="rgba(0,0,0,.35)" stroke-width="1.2"/><path d="M6 1 L12 7 L18 1 M1 7 H23 M12 7 V21 M6 1 L4 7 L12 21 L20 7 L18 1" stroke="rgba(255,255,255,.55)" stroke-width=".8" fill="none"/></svg>`;
+const CROWN = `<svg viewBox="0 0 24 18" aria-hidden="true"><path d="M2 15 L4 4 L9 9 L12 2 L15 9 L20 4 L22 15 Z" fill="#e7b93b" stroke="#8a6010" stroke-width="1"/><rect x="2" y="15" width="20" height="2.5" rx="1" fill="#c9962a"/></svg>`;
+const SCROLL = `<svg viewBox="0 0 24 18" aria-hidden="true"><rect x="4" y="3" width="16" height="12" rx="2" fill="#f3e2b8" stroke="#8a6a3a"/><circle cx="4" cy="9" r="3" fill="#e2c88f" stroke="#8a6a3a"/><circle cx="20" cy="9" r="3" fill="#e2c88f" stroke="#8a6a3a"/><path d="M8 7 H16 M8 10 H14" stroke="#8a6a3a"/></svg>`;
+const STAR = `<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 1 L12.6 7 L19 7.6 L14 11.8 L15.6 18.4 L10 14.8 L4.4 18.4 L6 11.8 L1 7.6 L7.4 7Z" fill="#f3dd9a" stroke="#8a6010"/></svg>`;
+const AB = { token: "토큰+1", steal: "뺏기", scroll: "특권", again: "한 번 더", joker: "조커" };
+const AB_LONG = { token: "같은 색 토큰 1개를 판에서 가져와요", steal: "상대 토큰 1개(금 제외)를 가져와요", scroll: "특권 1개를 받아요", again: "바로 한 번 더 해요", joker: "내가 가진 색 중 하나로 정해 그 색 보너스가 돼요" };
+
+const tokHTML = c => `<span class="tk c-${c}">${c === "A" ? `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="rgba(90,60,0,.5)" stroke-width="2"/><path d="M12 6 L14 11 L19 12 L14 13 L12 18 L10 13 L5 12 L10 11Z" fill="rgba(255,255,255,.6)"/></svg>` : c === "P" ? `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6" fill="rgba(255,255,255,.65)"/></svg>` : GEM_SVG}</span>`;
+function cardHTML(card, p, extra = "", attrs = "") {
+  const col = card.color === "X" ? (card.as || "X") : card.color;
+  const cost = ["W", "U", "G", "R", "K", "P"].filter(c => card.cost[c]).map(c => {
+    const short = p && (card.cost[c] - (c === "P" ? 0 : E.bonus(p, c))) > p.tok[c];
+    return `<span class="c-${c} ${short ? "short" : ""}">${card.cost[c]}</span>`;
+  }).join("");
+  const tag = attrs ? "button" : "div";
+  return `<${tag} class="cd c-${card.color === "X" && card.as ? card.as : card.color} ${extra}" ${attrs} aria-label="${card.lvl}단계 ${card.color === "X" ? "조커" : NAME[card.color]} 카드 ${card.pts}점">
+    <span class="band"></span>${card.pts ? `<span class="pts">${card.pts}</span>` : ""}
+    ${card.color === "X" ? `<span class="gem">${tokHTML(card.as || "W").replace('class="tk c-W"', 'class="tk c-X"')}</span>` : `<span class="gem">${tokHTML(col)}</span>`}
+    <span class="meta">${card.crowns ? `<span class="crw">${CROWN}${card.crowns}</span>` : "<span></span>"}${card.ab ? `<span class="ab">${AB[card.ab]}</span>` : ""}</span>
+    <span class="cost">${cost}</span></${tag}>`;
+}
+const royalHTML = (r, attrs = "", extra = "") => `<button class="roy ${extra}" ${attrs} aria-label="왕실 카드 ${r.pts}점">${CROWN}${r.pts}${r.ab ? `<small>${AB[r.ab]}</small>` : ""}</button>`;
+const MARK = `<svg class="mark-sd" viewBox="0 0 150 90" aria-hidden="true">${["#f1ede4", "#2f6fd6", "#26a065", "#d6413a", "#34323d"].map((c, i) => `<g transform="translate(${27 + i * 24} ${42 + (i % 2 ? 6 : 0)})"><path d="M-9 -12 H9 L15 -3 L0 16 L-15 -3Z" fill="${c}" stroke="#d9b45a" stroke-width="1.4"/><path d="M-9 -12 L0 -3 L9 -12 M-15 -3 H15 M0 -3 V16" stroke="rgba(255,255,255,.5)" stroke-width=".9" fill="none"/></g>`).join("")}<path d="M55 78 L62 66 L70 74 L75 62 L80 74 L88 66 L95 78Z" fill="#e7b93b" stroke="#8a6010"/></svg>`;
+
+const game = {
+  id: "splendor-duel",
+  title: "스플렌더 대결",
+  mark: MARK,
+  tagline: "보석 토큰을 모아 카드를 사세요. 명성 20점, 왕관 10개, 한 색으로 10점 — 셋 중 하나를 먼저 이루면 이겨요.",
+  hidden: false,
+  setup(players) { return E.setup(rnd, rnd(2)); },
+  apply(g, seat, a, env) { return E.apply(g, seat, a, env.names, rnd); },
+  viewer: g => g.turn,
+  result(g, ctx) {
+    if (g.phase !== "over") return null;
+    const N = ctx.names;
+    return { title: `${esc(N[g.winner])} 님 승리!`, html: `<p style="text-align:center;margin:0">${esc(g.winWhy)}을(를) 달성했어요.</p>
+      <table class="duo-table"><thead><tr><th></th><th>${esc(N[0])}</th><th>${esc(N[1])}</th></tr></thead><tbody>
+      <tr><td>명성</td><td class="num">${E.points(g.p[0])}</td><td class="num">${E.points(g.p[1])}</td></tr>
+      <tr><td>왕관</td><td class="num">${E.crowns(g.p[0])}</td><td class="num">${E.crowns(g.p[1])}</td></tr>
+      <tr><td>산 카드</td><td class="num">${g.p[0].cards.length}</td><td class="num">${g.p[1].cards.length}</td></tr></tbody></table>` };
+  },
+  render(ctx) {
+    const g = ctx.g, N = ctx.names, ui = ctx.ui;
+    const me = ctx.me < 0 ? 0 : ctx.me, op = 1 - me, spect = ctx.me < 0;
+    const myTurn = !spect && g.turn === me && g.phase !== "over";
+    const P = g.p[me];
+    const pend = g.phase === "choose" ? g.pending[0] : null;
+    if (!myTurn || g.phase !== "main" || ui.selSeq !== ctx.s.seq) { ui.sel = []; if (!myTurn || g.phase !== "main") ui.privMode = false; }
+    ui.selSeq = ctx.s.seq;
+    ui.sel = ui.sel || [];
+    const selOK = ui.sel.length && E.lineOK(ui.sel) && ui.sel.every(i => g.board[i] && g.board[i] !== "A");
+    const lastCells = g.last && g.last.type === "take" ? g.last.cells : [];
+
+    const purse = (s, mine) => {
+      const p = g.p[s];
+      const wallet = TOK.map(c => {
+        const pickable = mine && myTurn && ((g.phase === "discard" && p.tok[c] > 0));
+        const stealable = !mine && myTurn && pend && pend.type === "steal" && c !== "A" && p.tok[c] > 0;
+        const b = c === "P" || c === "A" ? "" : E.bonus(p, c);
+        const cp = c === "P" || c === "A" ? 0 : E.colorPts(p, c);
+        const attrs = pickable ? `data-a="discard" data-c="${c}"` : stealable ? `data-a="steal" data-c="${c}"` : "";
+        return `<button class="sd-w ${p.tok[c] ? "" : "zero"} ${pickable || stealable ? "pick" : ""}" ${attrs} ${attrs ? "" : "disabled"} aria-label="${NAME[c]} 토큰 ${p.tok[c]}개${b !== "" ? `, 보너스 ${b}` : ""}">
+          ${tokHTML(c)}<span class="n">${p.tok[c]}</span><span class="b">${b !== "" ? `+<em>${b}</em>${cp ? ` · ${cp}점` : ""}` : c === "P" ? "진주" : "금"}</span></button>`;
+      }).join("");
+      const res = p.res.length ? `<div class="sd-res">${p.res.map((card, i) => {
+        const can = mine && myTurn && g.phase === "main" && E.payment(p, card) && (card.color !== "X" || E.canJoker(p));
+        return mine && !spect ? cardHTML(card, p, can ? "can" : "", `data-a="rescard" data-i="${i}"`) : cardHTML(card, null);
+      }).join("")}</div>` : "";
+      return `<section class="sd-purse ${g.turn === s && g.phase !== "over" ? "turn" : ""}" aria-label="${esc(N[s])}의 보석">
+        <div class="sd-ph"><b>${mine && !spect ? "나 (" + esc(N[s]) + ")" : esc(N[s])}</b>
+          <span class="sd-stat">${STAR}${E.points(p)}<small>/20</small></span>
+          <span class="sd-stat">${CROWN}${E.crowns(p)}<small>/10</small></span>
+          <span class="sd-stat">${SCROLL}${p.priv}</span>
+          <span class="sd-stat"><small>토큰 ${E.tokCount(p)}/10 · 예약 ${p.res.length}/3</small></span>
+          ${g.turn === s && g.phase !== "over" ? `<span class="turnpill">차례</span>` : ""}</div>
+        <div class="sd-wallet">${wallet}</div>${res}</section>`;
+    };
+
+    const royals = `<div class="sd-royals"><span class="duo-note">왕관 3개·6개에 왕실 카드</span><div class="list">${g.royals.map((r, i) => royalHTML(r, myTurn && pend && pend.type === "royal" ? `data-a="royal" data-i="${i}"` : "disabled", myTurn && pend && pend.type === "royal" ? "pick" : "")).join("")}</div></div>`;
+    const rows = [3, 2, 1].map(l => `<div class="sd-row"><button class="sd-deck" data-a="deck" data-l="${l}" ${myTurn && g.phase === "main" && g.decks[l].length ? "" : "disabled"} aria-label="${l}단계 덱 ${g.decks[l].length}장"><span>${"Ⅰ Ⅱ Ⅲ".split(" ")[l - 1]}</span><small>${g.decks[l].length}</small></button>
+      ${g.show[l].map((card, i) => {
+        const can = myTurn && g.phase === "main" && E.payment(P, card) && (card.color !== "X" || E.canJoker(P));
+        const isNew = g.last && (g.last.type === "buy" || g.last.type === "reserve") && ui.prevShow && !ui.prevShow.includes(card.id);
+        return cardHTML(card, spect ? null : P, (can ? "can " : "") + (isNew ? "new" : ""), `data-a="card" data-l="${l}" data-i="${i}" ${myTurn && g.phase === "main" ? "" : "disabled"}`);
+      }).join("")}</div>`).join("");
+    ui.prevShow = [1, 2, 3].flatMap(l => g.show[l].map(c => c.id));
+
+    const board = g.board.map((t, i) => {
+      let can = false, hint = false;
+      if (myTurn && t) {
+        if (g.phase === "main") can = ui.privMode ? t !== "A" : t !== "A";
+        if (pend && pend.type === "takeColor" && t === pend.color) { can = true; hint = true; }
+      }
+      return `<button class="sd-cell ${ui.sel.includes(i) ? "sel" : ""} ${hint ? "hint" : ""} ${lastCells.includes(i) ? "last" : ""}" data-a="cell" data-i="${i}" ${can ? "" : "disabled"} aria-label="${t ? NAME[t] + " 토큰" : "빈 칸"}">${t ? tokHTML(t) : ""}</button>`;
+    }).join("");
+    const side = `<div class="sd-side"><span class="sd-bag" title="주머니">${g.bag.length}</span><span>주머니</span>
+      <span class="sd-scrolls" title="남은 특권">${Array.from({ length: g.privSupply }, () => `<span style="width:20px;display:inline-block">${SCROLL}</span>`).join("") || "—"}</span><span>남은 특권</span></div>`;
+
+    let say = "", act = "";
+    if (g.phase === "over") say = "";
+    else if (spect) say = `${esc(N[g.turn])} 님 차례`;
+    else if (!myTurn) say = `${esc(N[op])} 님이 고민 중이에요…`;
+    else if (g.phase === "discard") say = `<span class="bad">토큰이 ${E.tokCount(P)}개예요.</span> 10개가 될 때까지 <em>내 토큰을 눌러 반납</em>하세요`;
+    else if (pend) say = pend.type === "royal" ? "왕관 보상! <em>왕실 카드 한 장</em>을 고르세요" : pend.type === "steal" ? `<em>${esc(N[op])} 님 토큰</em> 하나를 눌러 가져오세요` : `카드 능력: 판에서 <em>${NAME[pend.color]} 토큰</em> 하나를 고르세요`;
+    else if (ui.privMode) say = "특권 사용: 판에서 가져올 토큰 하나를 누르세요 (금 제외)";
+    else if (ui.sel.length) say = selOK ? `${ui.sel.length}개 선택 — 한 줄로 붙어 있어요` : `<span class="bad">한 줄(가로·세로·대각선)로 붙은 토큰만 가져올 수 있어요</span>`;
+    else say = "토큰을 최대 3개(한 줄) 고르거나, 카드를 눌러 사거나 예약하세요";
+
+    if (myTurn && g.phase === "main") {
+      const boardEmpty = !g.board.some(t => t && t !== "A");
+      act = `<div class="sd-act">
+        ${ui.sel.length ? `<button class="duo-btn primary" data-a="take" ${selOK ? "" : "disabled"}><b>토큰 ${ui.sel.length}개 가져오기</b><span>${ui.sel.length === 3 && new Set(ui.sel.map(i => g.board[i])).size === 1 ? "같은 색 3개 — 상대 특권 +1" : ui.sel.filter(i => g.board[i] === "P").length >= 2 ? "진주 2개 — 상대 특권 +1" : "이걸로 차례를 마쳐요"}</span></button>
+          <button class="duo-btn" data-a="clear"><b>선택 취소</b><span>다시 고르기</span></button>` : `
+        <button class="duo-btn" data-a="privmode" ${P.priv && !boardEmpty ? "" : "disabled"}><b>${ui.privMode ? "특권 쓰기 그만" : `특권 쓰기 (${P.priv})`}</b><span>1개당 토큰 1개, 차례 전에 먼저</span></button>
+        <button class="duo-btn" data-a="refill" ${!g.refilled && g.bag.length ? "" : "disabled"}><b>판 다시 채우기</b><span>${boardEmpty ? "판이 비었어요 — 채워야 해요" : "상대가 특권 1개를 받아요"}</span></button>
+        ${E.canDoMain(g, me) ? "" : `<button class="duo-btn warn" data-a="pass"><b>차례 넘기기</b><span>할 수 있는 게 없어요</span></button>`}`}
+      </div>`;
+    }
+
+    return `${purse(op, false)}
+      ${royals}
+      <div class="sd-cards">${rows}</div>
+      <div class="sd-board-wrap"><div class="sd-board">${board}</div>${side}</div>
+      <p class="sd-say">${say}</p>${act}
+      ${purse(me, true)}`;
+  },
+  onClick(el, ctx) {
+    const g = ctx.g, ui = ctx.ui, a = el.dataset.a;
+    const me = ctx.me, P = g.p[me];
+    if (a === "cell") {
+      const i = +el.dataset.i;
+      if (g.phase === "choose") { ctx.act({ type: "takeColor", cell: i }); return; }
+      if (ui.privMode) { if (ctx.act({ type: "priv", cell: i })) { if (g.p[me].priv <= 1) ui.privMode = false; } return; }
+      ui.sel = ui.sel.includes(i) ? ui.sel.filter(x => x !== i) : ui.sel.length >= 3 ? [i] : ui.sel.concat(i);
+      ctx.rerender(); return;
+    }
+    if (a === "clear") { ui.sel = []; ctx.rerender(); return; }
+    if (a === "take") { if (ctx.act({ type: "take", cells: ui.sel })) ui.sel = []; return; }
+    if (a === "privmode") { ui.privMode = !ui.privMode; ui.sel = []; ctx.rerender(); return; }
+    if (a === "refill") { ctx.act({ type: "refill" }); return; }
+    if (a === "pass") { ctx.act({ type: "pass" }); return; }
+    if (a === "discard") { ctx.act({ type: "discard", color: el.dataset.c }); return; }
+    if (a === "steal") { ctx.act({ type: "steal", color: el.dataset.c }); return; }
+    if (a === "royal") { ctx.act({ type: "royal", idx: +el.dataset.i }); return; }
+    if (a === "card" || a === "rescard" || a === "deck") {
+      if (g.turn !== me || g.phase !== "main") return;
+      let src, card;
+      if (a === "card") { src = { lvl: +el.dataset.l, idx: +el.dataset.i }; card = g.show[src.lvl][src.idx]; }
+      else if (a === "rescard") { src = { res: +el.dataset.i }; card = P.res[src.res]; }
+      else { src = { deck: +el.dataset.l }; }
+      ui.cardSrc = src; ui.jk = null;
+      openSheet(ctx, src, card);
+      return;
+    }
+    if (a === "jk") { ui.jk = el.dataset.c; openSheet(ctx, ui.cardSrc, cardFor(g, me, ui.cardSrc)); return; }
+    if (a === "buy") { if (ctx.act({ type: "buy", src: ui.cardSrc, as: ui.jk })) ctx.closeSheet(); return; }
+    if (a === "reserve") { if (ctx.act({ type: "reserve", src: ui.cardSrc })) ctx.closeSheet(); return; }
+  },
+  rules: `
+  <p>둘이서 하는 스플렌더예요. 판 위의 보석 토큰을 가져와 카드를 사고, 카드가 주는 보너스로 더 비싼 카드를 사며 명성을 쌓아요.</p>
+  <h3>이기는 방법 (셋 중 하나를 먼저)</h3>
+  <ul><li>명성 <b>20점</b></li><li>왕관 <b>10개</b></li><li>한 가지 색 카드로만 <b>10점</b></li></ul>
+  <h3>토큰</h3>
+  <p>보석 5색 각 4개, 진주 2개, 금 3개가 5×5 판에 깔려요. 금은 아무 색으로나 쓸 수 있지만 카드를 예약할 때만 가져올 수 있어요.</p>
+  <h3>내 차례</h3>
+  <p><b>먼저 원하면 (선택)</b></p>
+  <ul><li><b>특권 쓰기</b>: 특권 1개를 내고 판에서 금이 아닌 토큰 1개를 가져와요. 여러 개 써도 돼요.</li>
+  <li><b>판 다시 채우기</b>: 주머니의 토큰을 모두 판에 깔아요. 대신 상대가 특권 1개를 받아요. 판이 비었으면 꼭 채워야 해요.</li></ul>
+  <p><b>그리고 셋 중 하나 (필수)</b></p>
+  <ol><li><b>토큰 가져오기</b>: 가로·세로·대각선으로 <b>한 줄로 붙어 있는</b> 토큰을 최대 3개. 금은 안 돼요. 같은 색 3개나 진주 2개를 가져가면 상대가 특권 1개를 받아요.</li>
+  <li><b>예약하기</b>: 진열된 카드나 덱 맨 위 카드를 손에 두고 금 1개를 가져와요. 예약은 3장까지.</li>
+  <li><b>카드 사기</b>: 진열 카드나 내 예약 카드를 사요. 내가 가진 카드 색마다 그 색 비용이 1씩 깎여요(보너스). 낸 토큰은 주머니로 가요.</li></ol>
+  <p>차례가 끝날 때 토큰이 10개를 넘으면 넘는 만큼 주머니에 반납해요.</p>
+  <h3>카드 능력</h3>
+  <div class="rule-ab">${Object.keys(AB).map(k => `<span>${AB[k]}</span><span>${AB_LONG[k]}</span>`).join("")}</div>
+  <h3>왕관과 왕실 카드</h3>
+  <p>카드의 왕관이 모여 3개, 6개가 되는 순간 왕실 카드를 한 장씩 골라 가져요. 왕실 카드는 명성 점수와 능력을 줘요.</p>
+  <h3>특권</h3>
+  <p>특권은 모두 3개예요. 받을 차례인데 남은 게 없으면 상대 것을 가져와요. 나중에 가는 사람이 1개를 들고 시작해요.</p>
+  <h3>이 화면에 대해</h3>
+  <ul><li>카드 구성(비용·점수·능력)은 원작의 구조를 따라 이 앱에서 새로 짠 거예요. 실제 카드와 숫자가 달라요.</li>
+  <li>예약한 카드는 상대에게도 보여요.</li>
+  <li>살 수 있는 카드는 초록 테두리, 모자라는 비용은 빨간 테두리로 보여요. 카드를 누르면 사기·예약 창이 열려요.</li>
+  <li>카드를 살 때 토큰은 자동으로 계산돼요. 색 토큰을 먼저 쓰고 모자라는 만큼 금을 써요.</li></ul>`,
+};
+function cardFor(g, me, src) { if (!src) return null; if (src.res != null) return g.p[me].res[src.res]; if (src.deck) return null; return g.show[src.lvl][src.idx]; }
+function openSheet(ctx, src, card) {
+  const g = ctx.g, me = ctx.me, P = g.p[me], ui = ctx.ui;
+  const goldOnBoard = g.board.includes("A");
+  const canRes = !src.res && src.res !== 0 && P.res.length < 3 && goldOnBoard;
+  const resWhy = P.res.length >= 3 ? "예약은 3장까지예요" : !goldOnBoard ? "판에 금 토큰이 없어요" : "";
+  if (!card) {
+    ctx.sheet(`<h2>${src.deck}단계 덱 맨 위 카드 예약</h2><p class="sub">어떤 카드인지 모르는 채로 예약하고 금 토큰 1개를 가져와요.</p>
+      <div class="sd-act"><button class="duo-btn primary" data-a="reserve" ${canRes ? "" : "disabled"}><b>예약하기</b><span>${canRes ? "금 +1" : resWhy}</span></button></div>`, { keep: false, label: "예약" });
+    return;
+  }
+  const pay = E.payment(P, card);
+  const joker = card.color === "X";
+  const jokerOK = !joker || E.canJoker(P);
+  const canBuy = pay && jokerOK && (!joker || ui.jk);
+  const payTxt = pay ? TOK.filter(c => pay[c]).map(c => `${NAME[c]} ${pay[c]}`).join(", ") || "공짜!" : "";
+  const shortTxt = !pay ? (() => { const need = []; let goldNeed = 0; for (const c of ["W", "U", "G", "R", "K", "P"]) { const n = Math.max(0, (card.cost[c] || 0) - (c === "P" ? 0 : E.bonus(P, c)) - P.tok[c]); if (n) { need.push(`${NAME[c]} ${n}`); goldNeed += n; } } return `모자라요: ${need.join(", ")} (금 ${P.tok.A}개로 채울 수 있는 만큼만 가능)`; })() : "";
+  const jk = joker ? `<p class="sub">조커 카드예요. 어떤 색 보너스로 쓸지 고르세요 (내가 이미 가진 색만).</p>
+    <div class="sd-jk">${GEMS.map(c => `<button data-a="jk" data-c="${c}" aria-pressed="${ui.jk === c}" ${E.bonus(P, c) ? "" : "disabled"} aria-label="${NAME[c]}">${tokHTML(c)}</button>`).join("")}</div>` : "";
+  ctx.sheet(`<div class="sd-sheet-card">${cardHTML(card, P)}<div class="info">
+      <b style="font-family:var(--f-display);font-size:17px">${card.lvl}단계 ${joker ? "조커" : NAME[card.color]} 카드</b>
+      <span>명성 ${card.pts}점 · 왕관 ${card.crowns}개</span>
+      ${card.ab ? `<span>능력: ${AB_LONG[card.ab]}</span>` : ""}
+      <span class="sub">${pay ? `낼 토큰: ${payTxt}` : shortTxt}</span></div></div>
+    ${jk}
+    <div class="sd-act">
+      <button class="duo-btn primary" data-a="buy" ${canBuy ? "" : "disabled"}><b>사기</b><span>${!pay ? "토큰이 모자라요" : !jokerOK ? "먼저 색 있는 카드가 있어야 해요" : joker && !ui.jk ? "보너스 색을 먼저 고르세요" : "보너스와 점수를 얻어요"}</span></button>
+      ${src.res != null ? "" : `<button class="duo-btn" data-a="reserve" ${canRes ? "" : "disabled"}><b>예약하기</b><span>${canRes ? "손에 두고 금 +1" : resWhy}</span></button>`}
+    </div>`, { label: "카드" });
+}
+Duo(game);
+})();
+</script>
+</body>
+</html>
