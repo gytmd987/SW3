@@ -7,7 +7,7 @@ TMP=$(mktemp -d)
 git fetch -q origin gh-pages
 git worktree add -q "$TMP" origin/gh-pages --detach
 find "$TMP" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
-for f in index.html .nojekyll shared vendor hanabi lostcities 6nimmt quoridor ubongo splendor-duel; do
+for f in index.html .nojekyll shared vendor hanabi lostcities 6nimmt quoridor ubongo splendor-duel cockroach; do
   [ -e "$f" ] && cp -R "$f" "$TMP/"
 done
 touch "$TMP/.nojekyll"

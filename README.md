@@ -9,6 +9,7 @@
 | 젝스님트 | `6nimmt/` |
 | 쿼리도 | `quoridor/` |
 | 우봉고 | `ubongo/` |
+| 바퀴벌레 포커 | `cockroach/` |
 | 스플렌더 대결 | `splendor-duel/` (규칙 엔진은 `engine.js`) |
 
 - `shared/duo.js`, `shared/duo.css` — 게임들이 같이 쓰는 뼈대: 방 코드 온라인 연결(PeerJS), 한 폰 모드, 로비, 규칙 창
