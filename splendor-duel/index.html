@@ -174,10 +174,8 @@ const game = {
   title: "스플렌더 대결",
   mark: MARK,
   tagline: "보석 토큰을 모아 카드를 사세요. 명성 20점, 왕관 10개, 한 색으로 10점 — 셋 중 하나를 먼저 이루면 이겨요.",
-  hidden: false,
   setup(players) { return E.setup(rnd, rnd(2)); },
   apply(g, seat, a, env) { return E.apply(g, seat, a, env.names, rnd); },
-  viewer: g => g.turn,
   result(g, ctx) {
     if (g.phase !== "over") return null;
     const N = ctx.names;

@@ -406,14 +406,14 @@ function theyKnowHTML(c) {
 
 /* ───────── app state ───────── */
 const ui = {
-  mode: store.get("hanabi-mode", null),      // "online" | "local"
+  mode: "online",                            // 한 폰 모드는 없앴다; 연결 수단이 없을 때만 "local"(안내 화면)
   name: store.get("hanabi-name", ""),
   db: null, ref: null, dbReady: false, dbChecked: false, canWrite: true,
   net: null,                                  // "db" (Claude artifact) | "peer" (room code) | null
   room: null, isHost: false, peer: null, conn: null, peerStatus: "idle",
   myId: null,
   online: null,                               // latest table doc
-  local: store.get("hanabi-local", null),     // local game state
+  local: null,
   localNames: store.get("hanabi-local-names", ["", ""]),
   localGate: true,                            // show pass-the-phone cover
   sheet: null,                                // {kind, ...}
@@ -696,13 +696,7 @@ function render() {
 function loadingHTML() {
   return `<div class="lobby"><div class="hero"><div class="mark">花火</div><p>테이블을 준비하고 있어요…</p></div></div>`;
 }
-function modeTabs() {
-  const on = ui.mode === "online";
-  return `<div class="tabs" role="group" aria-label="플레이 방식">
-    <button class="tab" id="tab-online" data-act="mode" data-v="online" aria-pressed="${on}">각자 폰으로 (온라인)</button>
-    <button class="tab" id="tab-local" data-act="mode" data-v="local" aria-pressed="${!on}">한 폰으로 같이</button>
-  </div>`;
-}
+function modeTabs() { return ""; }
 function heroHTML() {
   const back = window.claude ? "" : `<a class="iconbtn" href="../" style="align-self:flex-start">← 다른 게임</a>`;
   return `${back}<div class="hero"><div class="mark">花火</div><h1>둘이서 하나비</h1><p>서로의 카드는 보이지만 내 카드는 안 보여요. 힌트만으로 밤하늘에 25발의 불꽃을 완성해 보세요.</p></div>`;
@@ -737,17 +731,9 @@ function lobbyOnlineHTML(s) {
   </div>`;
 }
 function lobbyLocalHTML() {
-  const n = ui.localNames;
-  const noOnline = ui.dbChecked && !ui.net;
   return `<div class="lobby">${heroHTML()}
-    <div class="panel">${noOnline ? "" : modeTabs()}
-      <h2>한 폰으로 같이 하기</h2>
-      <p class="note">차례가 끝날 때마다 화면이 가려져요. 폰을 상대에게 넘기고 "내 차례 보기"를 누르면 돼요.</p>
-      <label class="fld" for="ln0">첫 번째 사람<input type="text" id="ln0" maxlength="12" placeholder="예: 지우" value="${esc(n[0] || "")}"></label>
-      <label class="fld" for="ln1">두 번째 사람<input type="text" id="ln1" maxlength="12" placeholder="예: 하린" value="${esc(n[1] || "")}"></label>
-      <div class="row"><button class="btn primary" data-act="local-start"><b>불꽃놀이 시작</b><span>누가 먼저 할지는 무작위로 정해져요</span></button></div>
-      ${noOnline ? `<p class="note">이 화면에서는 온라인 테이블을 쓸 수 없어서 한 폰 모드만 열려 있어요.</p>` : ""}
-    </div>
+    <div class="panel"><h2>이 브라우저에서는 연결할 수 없어요</h2>
+      <p class="note">이 브라우저는 폰끼리 연결하는 기능을 지원하지 않아요. 크롬이나 사파리 최신 버전으로 열어 주세요.</p></div>
     <div class="row"><button class="btn" data-act="rules"><b>규칙 보기</b><span>처음이라면 3분이면 충분해요</span></button></div>
   </div>`;
 }
@@ -869,7 +855,6 @@ function sheetHTML(sh, s) {
     const k = ui.armed;
     return wrapSheet(`<h2>메뉴</h2>
       <div class="row" style="flex-direction:column">
-        <button class="btn" data-act="mode" data-v="${ui.mode === "online" ? "local" : "online"}" ${(!ui.net && ui.mode === "local") ? "disabled" : ""}><b>${ui.mode === "online" ? "한 폰 모드로 바꾸기" : "온라인 모드로 바꾸기"}</b><span>지금 판은 그대로 남아 있어요</span></button>
         <button class="btn warn" data-act="restart" data-key="restart"><b>${k === "restart" ? "정말 새로 시작할까요? 한 번 더 누르기" : "이 판 그만두고 새 게임"}</b><span>같은 두 사람으로 카드를 다시 섞어요</span></button>
         <button class="btn warn" data-act="tolobby" data-key="tolobby"><b>${k === "tolobby" ? "정말 나갈까요? 한 번 더 누르기" : "처음 화면으로"}</b><span>${ui.mode === "online" ? "자리를 다시 정해요 (상대도 함께 이동)" : "이름을 다시 정해요"}</span></button>
         ${ui.net === "peer" && ui.mode === "online" && ui.room ? `<button class="btn warn" data-act="room-leave" data-key="room-leave"><b>${k === "room-leave" ? "정말 나갈까요? 한 번 더 누르기" : "방 나가기"}</b><span>이 방을 떠나요. 같은 코드로 다시 들어올 수 있어요</span></button>` : ""}

@@ -158,7 +158,6 @@ const game = {
   title: "쿼리도",
   mark: MARK,
   tagline: "말을 한 칸 옮기거나 벽을 세워 상대의 길을 돌리세요. 먼저 반대편 끝에 닿으면 이겨요.",
-  hidden: false,
   setup(players) {
     return { pos: [[8, 4], [0, 4]], walls: [], left: [10, 10], turn: Math.random() < .5 ? 0 : 1, winner: null, last: null, log: [] };
   },
@@ -181,7 +180,6 @@ const game = {
     g.turn = 1 - seat;
     return g;
   },
-  viewer: g => g.turn,
   result(g, ctx) {
     if (g.winner == null) return null;
     return { title: `${esc(ctx.names[g.winner])} 님 승리!`, html: `<p class="sub" style="text-align:center;margin:0">말이 먼저 건너편 끝줄에 닿았어요. 사용한 벽 ${10 - g.left[g.winner]}개.</p>` };
@@ -189,7 +187,7 @@ const game = {
   render(ctx) {
     const g = ctx.g, N = ctx.names;
     const me = ctx.me < 0 ? 0 : ctx.me, op = 1 - me, spect = ctx.me < 0;
-    const flip = !ctx.local && me === 1;           // 온라인에서는 내 말이 항상 아래쪽
+    const flip = me === 1;           // 내 말이 항상 아래쪽
     const R = r => flip ? 8 - r : r, C = c => flip ? 8 - c : c;
     const myTurn = !spect && g.turn === me && g.winner == null;
     const mode = ctx.ui.mode || "move";
@@ -230,11 +228,10 @@ const game = {
     let say;
     if (g.winner != null) say = `<em>${esc(N[g.winner])}</em> 님이 건너편에 도착했어요!`;
     else if (spect) say = `${esc(N[g.turn])} 님 차례`;
-    else if (!myTurn) say = ctx.local ? "" : `${esc(N[op])} 님이 고민 중이에요…`;
+    else if (!myTurn) say = `${esc(N[op])} 님이 고민 중이에요…`;
     else if (mode === "move") say = "노란 점이 있는 칸을 눌러 말을 옮기세요";
     else if (!ctx.ui.pv) say = g.left[me] ? "벽을 세울 교차점을 누르세요. 같은 점을 한 번 더 누르면 방향이 바뀌어요" : `<span class="bad">벽을 다 썼어요. 말을 옮겨야 해요</span>`;
     else say = problem ? `<span class="bad">${problem}</span>` : `<em>${ctx.ui.pv.o === "h" ? "가로" : "세로"} 벽</em> — 맞으면 "여기에 세우기"를 누르세요`;
-    if (ctx.local && myTurn) say = `<b>${esc(N[me])}</b> 님 차례 · ` + say;
 
     const modes = myTurn ? `<div class="q-modes" role="group" aria-label="할 일">
       <button data-a="mode" data-v="move" aria-pressed="${mode === "move"}">말 옮기기</button>
@@ -243,7 +240,7 @@ const game = {
       <button class="duo-btn" data-a="rot"><b>방향 바꾸기</b><span>지금: ${ctx.ui.pv.o === "h" ? "가로" : "세로"}</span></button>
       <button class="duo-btn primary" data-a="place" ${problem ? "disabled" : ""}><b>여기에 세우기</b><span>벽 1개를 써요</span></button></div>` : "";
 
-    const top = ctx.local ? 1 : op, bottom = ctx.local ? 0 : me;
+    const top = op, bottom = me;
     return `${who(top)}
       <div class="qb"><div class="qb-in">${cells}${walls}${preview}${pawns}${hot}</div></div>
       ${who(bottom)}

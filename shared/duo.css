@@ -9,6 +9,7 @@
   --radius: 14px;
 }
 html, body { height: 100%; }
+html { touch-action: manipulation; }   /* 아이폰에서 두 번 탭할 때 확대되지 않게 */
 body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--f-body); font-size: 15px; line-height: 1.5; overflow-x: hidden; -webkit-tap-highlight-color: transparent; }
 button { font: inherit; color: inherit; cursor: pointer; }
 button:disabled { cursor: not-allowed; }
@@ -32,9 +33,6 @@ button:disabled { cursor: not-allowed; }
 .duo-hero p { margin: 0; color: var(--muted); font-size: 14px; max-width: 36ch; }
 .duo-panel { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 16px; display: flex; flex-direction: column; gap: 12px; }
 .duo-panel h2 { margin: 0; font-family: var(--f-display); font-size: 18px; }
-.duo-tabs { display: flex; gap: 6px; }
-.duo-tab { flex: 1; padding: 8px; border-radius: 10px; border: 1px solid var(--line); background: transparent; font-size: 13.5px; }
-.duo-tab[aria-pressed=true] { border-color: var(--accent); color: var(--accent); background: var(--panel); }
 .duo-fld { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--muted); }
 .duo-fld input, .duo-fld select { font: inherit; font-size: 15px; color: var(--fg); background: var(--bg2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
 .duo-row { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -71,10 +69,6 @@ button:disabled { cursor: not-allowed; }
 .duo-sheet ul, .duo-sheet ol { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
 .duo-sheet .sub { color: var(--muted); font-size: 13px; }
 .duo-close { align-self: flex-end; }
-.duo-cover { position: fixed; inset: 0; z-index: 45; background: var(--bg); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding-inline: 24px; text-align: center; }
-.duo-cover h2 { margin: 0; font-family: var(--f-display); font-size: 24px; text-wrap: balance; }
-.duo-cover p { margin: 0; color: var(--muted); max-width: 36ch; }
-.duo-cover .duo-btn { flex: 0 0 auto; min-width: 230px; }
 .duo-result .big { font-family: var(--f-display); font-size: 30px; text-align: center; color: var(--accent); text-wrap: balance; }
 .duo-log { display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; }
 .duo-log div { padding-bottom: 6px; border-bottom: 1px solid var(--line); }
