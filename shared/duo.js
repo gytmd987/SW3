@@ -52,6 +52,7 @@ window.Duo = function (game) {
     myId: (() => { let id = store.get("hanabi-id", null); if (!id) { id = "p" + Date.now().toString(36) + rnd(1e9).toString(36); store.set("hanabi-id", id); } return id; })(),
     net: window.RTCPeerConnection ? "peer" : null,
     room: null, isHost: false, peer: null, conn: null, peerStatus: "idle", joinCode: "", guestId: null,
+    pending: [], aid: 0, lastAid: 0, lastRx: 0,
     online: null,
     sheet: null, armed: null, error: "",
     opts: Object.assign({}, defaults, store.get(K("opts"), {})),
@@ -67,10 +68,11 @@ window.Duo = function (game) {
   }
   function env(s) { return { players: s ? s.players : [], names: names(s) }; }
 
-  function setState(next, from) {
+  const saveState = () => { if (ui.room) store.set(K("room-" + ui.room), ui.online); };
+  function setState(next) {
     const prev = current();
-    ui.online = next; if (ui.room) store.set(K("room-" + ui.room), next);
-    if (from !== "adopt") send({ t: "sync", state: next });
+    ui.online = next; saveState();
+    sendSync();
     afterChange(prev, next);
   }
   function afterChange(prev, next) {
@@ -81,7 +83,10 @@ window.Duo = function (game) {
     }
   }
 
-  /* moves */
+  /* moves
+   손님의 행동은 번호(aid)를 붙여 방장에게 보내고, 방장이 "aid까지 받았다(ack)"고 알려 줄 때까지
+   2초마다 다시 보낸다. 방장은 이미 처리한 번호는 다시 처리하지 않는다. 메시지가 중간에
+   사라져도 결국 한 번만 반영된다. */
   function act(action) {
     const s = current();
     if (!s || s.status !== "playing") return false;
@@ -92,25 +97,24 @@ window.Duo = function (game) {
     if (!g2) return false;
     if (!ui.isHost) {
       if (!ui.conn) { toast("방장과 연결이 끊겨 있어요. 다시 연결되면 해 주세요."); return false; }
-      send({ t: "act", action });
+      queue({ kind: "act", action });
       // 화면에는 바로 반영하고, 방장이 보낸 상태가 오면 그걸로 맞춘다
       const next = Object.assign({}, s, { game: g2, seq: s.seq + 1 });
-      ui.online = next; if (ui.room) store.set(K("room-" + ui.room), next); afterChange(s, next);
+      ui.online = next; saveState(); afterChange(s, next);
     } else setState(Object.assign({}, s, { game: g2, seq: s.seq + 1 }));
     return true;
   }
   function hostApply(seat, action) {
     const s = ui.online;
-    if (!s || s.status !== "playing" || seat < 0) { send({ t: "sync", state: s }); return; }
     let g2 = null;
-    try { g2 = game.apply(clone(s.game), seat, action, env(s)); } catch (e) { console.error(e); }
+    if (s && s.status === "playing" && seat >= 0) { try { g2 = game.apply(clone(s.game), seat, action, env(s)); } catch (e) { console.error(e); } }
     if (g2) setState(Object.assign({}, s, { game: g2, seq: s.seq + 1 }));
-    else send({ t: "sync", state: s });
+    else sendSync();                                   // 받아들일 수 없는 행동이면 지금 상태로 되돌려 준다
   }
 
   /* lobby commands: start / again / lobby / opts */
   function command(cmd, arg) {
-    if (!ui.isHost) { if (!ui.conn) { toast("방장과 연결이 끊겨 있어요"); return; } send({ t: "cmd", cmd, arg }); return; }
+    if (!ui.isHost) { if (!ui.conn) { toast("방장과 연결이 끊겨 있어요"); return; } queue({ kind: "cmd", cmd, arg }); return; }
     runCommand(cmd, arg);
   }
   function runCommand(cmd, arg) {
@@ -119,13 +123,13 @@ window.Duo = function (game) {
     const n = clone(s);
     n.seq = s.seq + 1;
     if (cmd === "start" || cmd === "again") {
-      if (!n.players || n.players.length < 2) return;
+      if (!n.players || n.players.length < 2) { sendSync(); return; }
       n.status = "playing";
       n.game = game.setup(n.players, n.opts || ui.opts, { prev: cmd === "again" ? s.game : null });
       ui.g = {};
     } else if (cmd === "lobby") { n.status = "lobby"; n.game = null; }
     else if (cmd === "opts") { if (n.status !== "lobby") return; n.opts = Object.assign({}, n.opts, arg); }
-    else return;
+    else { sendSync(); return; }
     ui.sheet = null;
     setState(n);
   }
@@ -156,6 +160,11 @@ window.Duo = function (game) {
     ui.room = code; ui.isHost = host; ui.error = "";
     store.set(K("room"), { code, host });
     ui.online = store.get(K("room-" + code), null);
+    ui.pending = host ? [] : store.get(K("room-" + code + "-pend"), []);
+    ui.aid = store.get(K("room-" + code + "-aid"), 0);
+    ui.lastAid = host ? store.get(K("room-" + code + "-last"), 0) : 0;
+    ui.lastEp = host ? store.get(K("room-" + code + "-ep"), null) : null;
+    if (!host) { ui.ep = store.get(K("room-" + code + "-ep"), null); if (!ui.ep) { ui.ep = "e" + Date.now().toString(36) + rnd(1e6).toString(36); store.set(K("room-" + code + "-ep"), ui.ep); store.set(K("room-" + code + "-aid"), 0); ui.aid = 0; } }
     if (host && !ui.online) { ui.online = lobbyState(); store.set(K("room-" + code), ui.online); }
     ui.peerStatus = "opening"; render();
     try { await loadPeerLib(); } catch (e) { ui.peerStatus = "error"; ui.error = "연결 모듈을 불러오지 못했어요. 인터넷 연결을 확인하고 새로고침해 주세요."; render(); return; }
@@ -192,7 +201,7 @@ window.Duo = function (game) {
   function connectToHost() {
     if (!ui.peer || ui.peer.destroyed) return;
     const peer = ui.peer;
-    const conn = peer.connect(PEER_PREFIX + ui.room, { reliable: true });
+    const conn = peer.connect(PEER_PREFIX + ui.room, { reliable: true, serialization: "json" });
     attach(conn);
     setTimeout(() => { if (!conn._opened && ui.peer === peer && !peer.destroyed && !ui.conn) { try { conn.close(); } catch (e) {} ui.peerStatus = "nohost"; render(); connectToHost(); } }, 12000);
   }
@@ -200,34 +209,68 @@ window.Duo = function (game) {
     conn.on("open", () => {
       conn._opened = true;
       if (ui.conn && ui.conn !== conn) { try { ui.conn.close(); } catch (e) {} }
-      ui.conn = conn; ui.peerStatus = "connected"; ui.error = "";
-      conn.send({ t: "hello", id: ui.myId, name: ui.name, state: ui.online });
+      ui.conn = conn; ui.peerStatus = "connected"; ui.error = ""; ui.lastRx = Date.now();
+      send({ t: "hello", id: ui.myId, name: ui.name, state: ui.online, seq: seqOf() });
+      if (!ui.isHost) flushPending();
       render();
     });
-    conn.on("data", m => { if (ui.conn === conn) onMsg(m); });
+    conn.on("data", m => { if (window.__duoStall) return; if (ui.conn === conn) { ui.lastRx = Date.now(); onMsg(m); } });
     const gone = () => {
       if (ui.conn !== conn) return;
       ui.conn = null; ui.peerStatus = ui.isHost ? "waiting" : "lost"; render();
-      if (!ui.isHost) retry(2500);
+      if (!ui.isHost) retry(1500);
     };
     conn.on("close", gone); conn.on("error", gone);
+    conn._gone = gone;
   }
-  function send(m) { try { if (ui.conn && ui.conn.open) ui.conn.send(m); } catch (e) {} }
+  const DROP = +(params.get("droptest") || 0);          // 시험용: 메시지를 일부러 이 비율만큼 버린다
+  function send(m) {
+    if ((DROP && Math.random() < DROP) || window.__duoStall) return false;
+    try { if (ui.conn && ui.conn.open) { ui.conn.send(m); return true; } } catch (e) {}
+    return false;
+  }
+  const seqOf = () => (ui.online ? ui.online.seq : 0);
+
+  /* 손님 쪽: 아직 방장이 확인하지 않은 행동 */
+  const pendKey = () => K("room-" + ui.room + "-pend");
+  function queue(item) {
+    ui.aid = (ui.aid || store.get(K("room-" + ui.room + "-aid"), 0)) + 1;
+    store.set(K("room-" + ui.room + "-aid"), ui.aid);
+    item.aid = ui.aid;
+    ui.pending.push(item); store.set(pendKey(), ui.pending);
+    sendItem(item);
+  }
+  // ep: 이 손님 브라우저의 번호 묶음. 손님이 기록을 잃고 번호를 1부터 다시 세면 방장도 처음부터 센다.
+  function sendItem(it) { send(it.kind === "act" ? { t: "act", ep: ui.ep, aid: it.aid, action: it.action } : { t: "cmd", ep: ui.ep, aid: it.aid, cmd: it.cmd, arg: it.arg }); }
+  function flushPending() { ui.pending.forEach(sendItem); }
+  function prune(ack) {
+    if (typeof ack !== "number") return;
+    const before = ui.pending.length;
+    ui.pending = ui.pending.filter(it => it.aid > ack);
+    if (ui.pending.length !== before) store.set(pendKey(), ui.pending);
+  }
+
+  /* 방장 쪽: 손님 행동을 어디까지 처리했는지 */
+  const lastKey = () => K("room-" + ui.room + "-last");
+  function sendSync() { send({ t: "sync", state: ui.online, ack: ui.lastAid || 0 }); }
+
   function adopt(st) {
+    // 손님만 쓴다: 방장 상태가 기준이다. 아직 확인 안 된 내 행동이 있으면 그게 반영된 상태를 기다린다.
     if (!st || typeof st !== "object" || typeof st.seq !== "number") return false;
+    if (ui.pending.length) return false;
     const cur = ui.online;
-    if (cur && st.seq < cur.seq) return false;
-    if (cur && st.seq === cur.seq && (ui.isHost || JSON.stringify(st) === JSON.stringify(cur))) return false;
-    const prev = cur;
-    ui.online = clone(st); if (ui.room) store.set(K("room-" + ui.room), ui.online);
-    afterChange(prev, ui.online);
+    if (cur && JSON.stringify(st) === JSON.stringify(cur)) return false;
+    ui.online = clone(st); saveState();
+    afterChange(cur, ui.online);
     return true;
   }
   function onMsg(m) {
     if (!m || typeof m !== "object") return;
-    if (m.t === "hello") {
-      if (ui.isHost) {
-        if (m.state && ui.online && m.state.seq > ui.online.seq) adopt(m.state);
+    if (ui.isHost) {
+      if (m.t === "hello") {
+        if (m.state && typeof m.state.seq === "number" && (!ui.online || (ui.online.status === "lobby" && ui.online.seq <= 2 && m.state.seq > ui.online.seq))) {
+          ui.online = clone(m.state); saveState();          // 방장이 기록을 잃어버린 경우에만 손님 것을 받는다
+        }
         const s = ui.online ? clone(ui.online) : lobbyState();
         const name = String(m.name || "상대").slice(0, 12);
         const i = s.players.findIndex(p => p.id === m.id);
@@ -236,19 +279,45 @@ window.Duo = function (game) {
           s.players.push({ id: String(m.id), name }); s.seq += 1;
         } else if (s.status === "lobby" && s.players[i].name !== name) { s.players[i].name = name; s.seq += 1; }
         ui.guestId = String(m.id);
-        ui.online = s; store.set(K("room-" + ui.room), s);
-        send({ t: "sync", state: s }); render();
-      } else { adopt(m.state); }
-    } else if (m.t === "sync") {
-      if (!adopt(m.state) && ui.isHost && m.state && ui.online && m.state.seq === ui.online.seq) send({ t: "sync", state: ui.online });
-    } else if (m.t === "act" && ui.isHost) {
-      const seat = ui.online ? ui.online.players.findIndex(p => p.id === ui.guestId) : -1;
-      hostApply(seat, m.action);
-    } else if (m.t === "cmd" && ui.isHost) {
-      if (m.cmd === "opts") { send({ t: "sync", state: ui.online }); return; }   // 설정은 방장만
-      runCommand(m.cmd, m.arg);
-    } else if (m.t === "full") { ui.peerStatus = "full"; render(); }
+        const prev = ui.online; ui.online = s; saveState();
+        sendSync(); afterChange(prev, s);
+      } else if (m.t === "act" || m.t === "cmd") {
+        if (m.ep && m.ep !== ui.lastEp) { ui.lastEp = m.ep; ui.lastAid = 0; store.set(K("room-" + ui.room + "-ep"), m.ep); }
+        if (typeof m.aid !== "number" || m.aid <= (ui.lastAid || 0)) { sendSync(); return; }   // 이미 처리한 것
+        ui.lastAid = m.aid; store.set(lastKey(), ui.lastAid);
+        if (m.t === "act") hostApply(ui.online ? ui.online.players.findIndex(p => p.id === ui.guestId) : -1, m.action);
+        else if (m.cmd === "opts") sendSync();                 // 설정은 방장만
+        else runCommand(m.cmd, m.arg);
+      } else if (m.t === "ping") {
+        if (m.seq !== seqOf()) sendSync();
+      }
+    } else {
+      if (m.t === "sync") { prune(m.ack); adopt(m.state); }
+      else if (m.t === "ping") { prune(m.ack); if (!ui.pending.length && m.seq !== seqOf()) send({ t: "need" }); }
+      else if (m.t === "full") { ui.peerStatus = "full"; render(); }
+    }
+    if (ui.isHost && m.t === "need") sendSync();
   }
+
+  /* 2초마다: 서로 상태 번호 확인, 못 받은 행동 다시 보내기, 응답이 끊긴 연결 정리 */
+  setInterval(() => {
+    if (!ui.room || !ui.conn) return;
+    if (Date.now() - (ui.lastRx || 0) > 9000) { const c = ui.conn; try { c.close(); } catch (e) {} if (c._gone) c._gone(); return; }
+    if (ui.isHost) send({ t: "ping", seq: seqOf(), ack: ui.lastAid || 0 });
+    else {
+      if (!ui.online || mySeat(ui.online) < 0) send({ t: "hello", id: ui.myId, name: ui.name, state: ui.online, seq: seqOf() });   // 아직 자리에 안 들어갔으면 인사 다시
+      flushPending(); send({ t: "ping", seq: seqOf() });
+    }
+  }, 2000);
+  // 다른 앱(카톡 등)에 갔다가 돌아오거나, 사파리가 뒤로 가기로 페이지를 되살리면 바로 다시 맞춘다
+  const resume = () => {
+    if (document.hidden || !ui.room) return;
+    if (!ui.conn) { if (!ui.isHost) startPeer(); return; }
+    if (Date.now() - (ui.lastRx || 0) > 5000) { const c = ui.conn; try { c.close(); } catch (e) {} if (c._gone) c._gone(); if (!ui.isHost) startPeer(); return; }
+    if (ui.isHost) sendSync(); else { flushPending(); send({ t: "ping", seq: seqOf() }); }
+  };
+  document.addEventListener("visibilitychange", resume);
+  window.addEventListener("pageshow", e => { if (e.persisted && ui.room) { ui.lastRx = 0; resume(); } });
 
   /* ───── rendering ───── */
   const connPill = () => {
