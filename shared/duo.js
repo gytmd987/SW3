@@ -2,19 +2,16 @@
  *
  * A game page calls Duo(game) with:
  *   id, title, mark (hero HTML), tagline, rules (HTML)
- *   hidden        true if each player has private cards (same-phone mode then hides
- *                 the screen between turns)
  *   options       [{id, label, choices:[{v, label}], def}]  lobby settings
- *   setup(players, opts, env) -> g            env = {local, prev}
+ *   setup(players, opts, env) -> g            env = {prev}
  *   apply(g, seat, action, env) -> g | null   pure move reducer; null = illegal
- *   viewer(g) -> seat                         whose view to show in same-phone mode
- *   needsCover(g) -> bool (optional)          false while nothing private is on screen
  *   render(ctx) -> HTML                       the table
  *   onClick(el, ctx)                          for elements with data-a="…"
  *   mounted(root, ctx) (optional)             after each render (drag & drop etc.)
+ *   holdRender() -> bool (optional)           true while a drag is in progress; redraws wait
+ *                                             until the game calls ctx.flush()
  *   changed(prev, g, ctx) (optional)          after a new state arrives (animations)
  *   result(g, ctx) -> {title, html} | null    game over summary
- *   coverText(g) -> string (optional)         line shown on the pass-the-phone screen
  *
  * Online play: the room creator's page is the authority. The guest sends its moves as
  * actions; the host applies them and sends back the whole state. Both keep the state in
@@ -51,36 +48,29 @@ window.Duo = function (game) {
   (game.options || []).forEach(o => { defaults[o.id] = o.def; });
 
   const ui = {
-    mode: store.get(K("mode"), "online"),
     name: store.get("duo-name", "") || store.get("hanabi-name", ""),
     myId: (() => { let id = store.get("hanabi-id", null); if (!id) { id = "p" + Date.now().toString(36) + rnd(1e9).toString(36); store.set("hanabi-id", id); } return id; })(),
     net: window.RTCPeerConnection ? "peer" : null,
     room: null, isHost: false, peer: null, conn: null, peerStatus: "idle", joinCode: "", guestId: null,
     online: null,
-    local: store.get(K("local"), null),
-    localNames: store.get("duo-local-names", ["", ""]),
-    shownViewer: null,
     sheet: null, armed: null, error: "",
     opts: Object.assign({}, defaults, store.get(K("opts"), {})),
     g: {},                          // per-game transient UI state (selection etc.)
   };
-  if (!ui.net) ui.mode = "local";
 
   /* ───── state helpers ───── */
-  const current = () => ui.mode === "online" ? ui.online : ui.local;
+  const current = () => ui.online;
   const names = s => (s && s.players ? s.players.map(p => p.name) : ["", ""]);
   function mySeat(s) {
     if (!s || !s.players) return -1;
-    if (ui.mode === "local") return s.status === "playing" && s.game ? game.viewer(s.game) : 0;
     return s.players.findIndex(p => p.id === ui.myId);
   }
-  function env(s) { return { local: ui.mode === "local", players: s ? s.players : [], names: names(s) }; }
+  function env(s) { return { players: s ? s.players : [], names: names(s) }; }
 
   function setState(next, from) {
     const prev = current();
-    if (ui.mode === "local") { ui.local = next; store.set(K("local"), next); }
-    else { ui.online = next; if (ui.room) store.set(K("room-" + ui.room), next); }
-    if (from !== "adopt" && ui.mode === "online") send({ t: "sync", state: next });
+    ui.online = next; if (ui.room) store.set(K("room-" + ui.room), next);
+    if (from !== "adopt") send({ t: "sync", state: next });
     afterChange(prev, next);
   }
   function afterChange(prev, next) {
@@ -100,11 +90,9 @@ window.Duo = function (game) {
     let g2 = null;
     try { g2 = game.apply(clone(s.game), seat, action, env(s)); } catch (e) { console.error(e); }
     if (!g2) return false;
-    if (ui.mode === "online" && !ui.isHost) {
+    if (!ui.isHost) {
       if (!ui.conn) { toast("방장과 연결이 끊겨 있어요. 다시 연결되면 해 주세요."); return false; }
       send({ t: "act", action });
-    }
-    if (ui.mode === "online" && !ui.isHost) {
       // 화면에는 바로 반영하고, 방장이 보낸 상태가 오면 그걸로 맞춘다
       const next = Object.assign({}, s, { game: g2, seq: s.seq + 1 });
       ui.online = next; if (ui.room) store.set(K("room-" + ui.room), next); afterChange(s, next);
@@ -122,7 +110,7 @@ window.Duo = function (game) {
 
   /* lobby commands: start / again / lobby / opts */
   function command(cmd, arg) {
-    if (ui.mode === "online" && !ui.isHost) { if (!ui.conn) { toast("방장과 연결이 끊겨 있어요"); return; } send({ t: "cmd", cmd, arg }); return; }
+    if (!ui.isHost) { if (!ui.conn) { toast("방장과 연결이 끊겨 있어요"); return; } send({ t: "cmd", cmd, arg }); return; }
     runCommand(cmd, arg);
   }
   function runCommand(cmd, arg) {
@@ -133,8 +121,8 @@ window.Duo = function (game) {
     if (cmd === "start" || cmd === "again") {
       if (!n.players || n.players.length < 2) return;
       n.status = "playing";
-      n.game = game.setup(n.players, n.opts || ui.opts, { local: ui.mode === "local", prev: cmd === "again" ? s.game : null });
-      ui.shownViewer = null; ui.g = {};
+      n.game = game.setup(n.players, n.opts || ui.opts, { prev: cmd === "again" ? s.game : null });
+      ui.g = {};
     } else if (cmd === "lobby") { n.status = "lobby"; n.game = null; }
     else if (cmd === "opts") { if (n.status !== "lobby") return; n.opts = Object.assign({}, n.opts, arg); }
     else return;
@@ -264,16 +252,13 @@ window.Duo = function (game) {
 
   /* ───── rendering ───── */
   const connPill = () => {
-    if (ui.mode !== "online" || !ui.room) return "";
+    if (!ui.room) return "";
     const st = ui.peerStatus;
     const txt = st === "connected" ? "연결됨" : st === "waiting" ? "상대 기다리는 중" : st === "nohost" ? "방장 찾는 중" : st === "lost" ? "다시 연결 중" : st === "full" ? "방이 가득 찼어요" : st === "error" ? "연결 안 됨" : "연결 준비 중";
     return `<span class="duo-conn ${st === "connected" ? "ok" : ""}" role="status">${txt}</span>`;
   };
   const hero = () => `<a class="duo-pill" href="../" style="align-self:flex-start">← 다른 게임</a>
     <div class="duo-hero"><div class="mark">${game.mark}</div><h1>${esc(game.title)}</h1><p>${game.tagline}</p></div>`;
-  const tabs = () => !ui.net ? "" : `<div class="duo-tabs" role="group" aria-label="플레이 방식">
-      <button class="duo-tab" data-duo="mode" data-v="online" aria-pressed="${ui.mode === "online"}">각자 폰으로 (온라인)</button>
-      <button class="duo-tab" data-duo="mode" data-v="local" aria-pressed="${ui.mode === "local"}">한 폰으로 같이</button></div>`;
   const rulesBtn = `<button class="duo-btn" data-duo="rules"><b>규칙 보기</b><span>처음이라면 먼저 읽어 보세요</span></button>`;
 
   function optsHTML(opts, editable) {
@@ -283,7 +268,7 @@ window.Duo = function (game) {
   }
   function roomEntryHTML() {
     return `<div class="duo-lobby">${hero()}
-      <div class="duo-panel">${tabs()}
+      <div class="duo-panel">
         <h2>방 만들고 코드로 들어오기</h2>
         <label class="duo-fld" for="name-in">내 이름<input type="text" id="name-in" maxlength="12" placeholder="예: 지우" value="${esc(ui.name)}"></label>
         ${ui.joinCode ? "" : `<div class="duo-row"><button class="duo-btn primary" data-duo="create"><b>방 만들기</b><span>코드와 링크가 나와요. 상대에게 보내 주세요</span></button></div>`}
@@ -293,6 +278,10 @@ window.Duo = function (game) {
         <p class="duo-note">방을 만든 사람의 화면이 게임판 역할을 해요. 누가 페이지를 닫아도 다시 열면 이어서 할 수 있어요.</p>
       </div>
       <div class="duo-row">${rulesBtn}</div></div>`;
+  }
+  function noNetHTML() {
+    return `<div class="duo-lobby">${hero()}<div class="duo-panel"><h2>이 브라우저에서는 연결할 수 없어요</h2>
+      <p class="duo-note">이 브라우저는 폰끼리 연결하는 기능(WebRTC)을 지원하지 않아요. 크롬이나 사파리 최신 버전으로 열어 주세요.</p></div></div>`;
   }
   function roomLobbyHTML(s) {
     const players = (s && s.players) || [];
@@ -317,37 +306,17 @@ window.Duo = function (game) {
       <div class="duo-row">${rulesBtn}
         <button class="duo-btn warn" data-duo="leave" data-key="leave"><b>${ui.armed === "leave" ? "정말 나갈까요? 한 번 더 누르기" : "방 나가기"}</b><span>다른 방을 만들거나 들어가요</span></button></div></div>`;
   }
-  function localLobbyHTML() {
-    const n = ui.localNames;
-    return `<div class="duo-lobby">${hero()}
-      <div class="duo-panel">${tabs()}
-        <h2>한 폰으로 같이 하기</h2>
-        <p class="duo-note">${game.hidden ? "내 카드가 보이는 순간마다 화면이 가려져요. 폰을 상대에게 넘기고 버튼을 누르면 돼요." : "폰 하나를 가운데 두고 번갈아 하면 돼요."}</p>
-        <label class="duo-fld" for="ln0">첫 번째 사람<input type="text" id="ln0" maxlength="12" placeholder="예: 지우" value="${esc(n[0] || "")}"></label>
-        <label class="duo-fld" for="ln1">두 번째 사람<input type="text" id="ln1" maxlength="12" placeholder="예: 하린" value="${esc(n[1] || "")}"></label>
-        ${optsHTML(ui.opts, true)}
-        <div class="duo-row"><button class="duo-btn primary" data-duo="local-start"><b>게임 시작</b><span>누가 먼저 할지는 무작위로 정해져요</span></button></div>
-        ${!ui.net ? `<p class="duo-note">이 브라우저는 온라인 연결을 지원하지 않아서 한 폰 모드만 열려 있어요.</p>` : ""}
-      </div>
-      <div class="duo-row">${rulesBtn}</div></div>`;
-  }
-
   function ctxFor(s) {
     const me = mySeat(s);
     return {
-      s, g: s.game, me, local: ui.mode === "local", names: names(s), opts: s.opts || ui.opts,
-      covered: coverShown(s),
+      s, g: s.game, me, names: names(s), opts: s.opts || ui.opts,
       ui: ui.g, act, esc, toast, josa,
       rerender: render,
-      online: ui.mode === "online", connected: ui.peerStatus === "connected", isHost: ui.isHost,
+      flush() { if (renderPending) render(); },
+      connected: ui.peerStatus === "connected", isHost: ui.isHost,
       sheet(html, opts) { ui.sheet = Object.assign({ kind: "game", html }, opts || {}); render(); },
       closeSheet() { ui.sheet = null; render(); },
     };
-  }
-  function coverShown(s) {
-    return ui.mode === "local" && game.hidden && s && s.status === "playing" && !!s.game && !ui.sheet &&
-      !(game.result && game.result(s.game, { names: names(s) })) &&
-      (!game.needsCover || game.needsCover(s.game)) && ui.shownViewer !== game.viewer(s.game);
   }
   function tableHTML(s, ctx) {
     const log = s.game && Array.isArray(s.game.log);
@@ -357,18 +326,17 @@ window.Duo = function (game) {
       ${ctx.me < 0 ? `<p class="duo-wait">두 자리가 모두 차 있어서 구경 중이에요.</p>` : ""}`;
   }
 
+  let renderPending = false;
   function render() {
+    if (game.holdRender && game.holdRender()) { renderPending = true; return; }
+    renderPending = false;
     const app = $("#app");
     const s = current();
     let html, ctx = null;
-    if (ui.mode === "online") {
-      if (!ui.room) html = roomEntryHTML();
-      else if (!s || s.status !== "playing" || !s.game) html = roomLobbyHTML(s);
-      else { ctx = ctxFor(s); html = tableHTML(s, ctx); }
-    } else {
-      if (!s || s.status !== "playing" || !s.game) html = localLobbyHTML();
-      else { ctx = ctxFor(s); html = tableHTML(s, ctx); }
-    }
+    if (!ui.net) html = noNetHTML();
+    else if (!ui.room) html = roomEntryHTML();
+    else if (!s || s.status !== "playing" || !s.game) html = roomLobbyHTML(s);
+    else { ctx = ctxFor(s); html = tableHTML(s, ctx); }
     app.innerHTML = html;
     $("#layer").innerHTML = layerHTML(s, ctx);
     if (ctx && game.mounted) { try { game.mounted($("#duo-game"), ctx); } catch (e) { console.error(e); } }
@@ -378,23 +346,12 @@ window.Duo = function (game) {
     let h = "";
     const res = ctx && game.result ? game.result(s.game, ctx) : null;
     if (res && (!sh || sh.kind === "menu")) {
-      const canAct = ui.mode === "local" || ctx.me >= 0;
+      const canAct = ctx.me >= 0;
       h += `<div class="duo-scrim center"><div class="duo-sheet duo-result" role="dialog" aria-modal="true" aria-label="게임 결과">
         <div class="big">${res.title}</div>${res.html || ""}
         ${canAct ? `<div class="duo-row"><button class="duo-btn primary" data-duo="again"><b>한 판 더</b><span>같은 둘이서 바로 다시</span></button>
         <button class="duo-btn" data-duo="lobby"><b>처음 화면</b><span>설정을 바꾸거나 이름을 바꿔요</span></button></div>` : ""}
         <button class="duo-pill duo-close" data-duo="peek" style="align-self:center">판 다시 보기</button></div></div>`;
-    } else if (ctx && ui.mode === "local" && game.hidden && s.status === "playing" && !sh && (!game.needsCover || game.needsCover(s.game))) {
-      const v = game.viewer(s.game);
-      if (ui.shownViewer !== v) {
-        const nm = names(s)[v] || "";
-        const line = game.coverText ? game.coverText(s.game, ctx) : "";
-        h += `<div class="duo-cover" role="dialog" aria-modal="true" aria-label="차례 넘기기">
-          <div class="mark">${game.mark}</div><h2>${esc(nm)} 님 차례예요</h2>
-          ${line ? `<p>${esc(line)}</p>` : ""}
-          <p>${esc(josa(nm, "이", "가"))} 아닌 사람은 화면을 보지 말고 폰을 넘겨 주세요.</p>
-          <button class="duo-btn primary center" data-duo="ungate" data-v="${v}"><b>${esc(nm)}, 내 화면 보기</b></button></div>`;
-      }
     }
     if (sh) h += sheetHTML(sh, s);
     return h;
@@ -411,10 +368,9 @@ window.Duo = function (game) {
     if (sh.kind === "menu") {
       const k = ui.armed;
       return wrapSheet(`<h2>메뉴</h2><div class="duo-row" style="flex-direction:column">
-        ${ui.net ? `<button class="duo-btn" data-duo="mode" data-v="${ui.mode === "online" ? "local" : "online"}"><b>${ui.mode === "online" ? "한 폰 모드로 바꾸기" : "온라인 모드로 바꾸기"}</b><span>지금 판은 그대로 남아 있어요</span></button>` : ""}
         <button class="duo-btn warn" data-duo="again" data-key="again"><b>${k === "again" ? "정말 새로 시작할까요? 한 번 더 누르기" : "이 판 그만두고 새 게임"}</b><span>같은 두 사람으로 처음부터</span></button>
-        <button class="duo-btn warn" data-duo="lobby" data-key="lobby"><b>${k === "lobby" ? "정말 나갈까요? 한 번 더 누르기" : "처음 화면으로"}</b><span>${ui.mode === "online" ? "설정 화면으로 (상대도 함께 이동)" : "이름과 설정을 다시 정해요"}</span></button>
-        ${ui.mode === "online" && ui.room ? `<button class="duo-btn warn" data-duo="leave" data-key="leave"><b>${k === "leave" ? "정말 나갈까요? 한 번 더 누르기" : "방 나가기"}</b><span>같은 코드로 다시 들어올 수 있어요</span></button>` : ""}
+        <button class="duo-btn warn" data-duo="lobby" data-key="lobby"><b>${k === "lobby" ? "정말 나갈까요? 한 번 더 누르기" : "처음 화면으로"}</b><span>설정 화면으로 (상대도 함께 이동)</span></button>
+        ${ui.room ? `<button class="duo-btn warn" data-duo="leave" data-key="leave"><b>${k === "leave" ? "정말 나갈까요? 한 번 더 누르기" : "방 나가기"}</b><span>같은 코드로 다시 들어올 수 있어요</span></button>` : ""}
       </div>`, "메뉴");
     }
     return "";
@@ -437,13 +393,11 @@ window.Duo = function (game) {
     ui.armed = null;
     const s = current();
     switch (cmd) {
-      case "mode": ui.mode = d.dataset.v; store.set(K("mode"), ui.mode); ui.sheet = null; ui.error = ""; ui.shownViewer = null; ui.g = {}; render(); break;
       case "rules": ui.sheet = { kind: "rules" }; render(); break;
       case "log": ui.sheet = { kind: "log" }; render(); break;
       case "menu": ui.sheet = { kind: "menu" }; render(); break;
       case "close": ui.sheet = null; render(); break;
       case "peek": ui.sheet = { kind: "peek" }; render(); toast("다 봤으면 메뉴(⋯)에서 새 게임을 시작하세요"); break;
-      case "ungate": ui.shownViewer = +d.dataset.v; render(); break;
       case "copy": {
         const link = shareLink(), inp = $("#share-link");
         const fb = () => { if (inp) { inp.focus(); inp.select(); } toast("링크를 길게 눌러 복사해 주세요"); };
@@ -462,17 +416,7 @@ window.Duo = function (game) {
       case "leave": ui.sheet = null; leaveRoom(); break;
       case "start": command("start"); break;
       case "again": ui.sheet = null; command("again"); break;
-      case "lobby": ui.sheet = null; if (ui.mode === "local") { ui.local = null; store.set(K("local"), null); render(); } else command("lobby"); break;
-      case "local-start": {
-        const a0 = ($("#ln0").value || "").trim().slice(0, 12) || "첫째";
-        const a1 = ($("#ln1").value || "").trim().slice(0, 12) || "둘째";
-        ui.localNames = [a0, a1]; store.set("duo-local-names", ui.localNames);
-        ui.shownViewer = null; ui.g = {};
-        const prev = ui.local;
-        const st = { v: 1, status: "lobby", players: [{ id: "L0", name: a0 }, { id: "L1", name: a1 }], opts: Object.assign({}, ui.opts), seq: (prev && prev.seq) || 0, game: null };
-        ui.local = st; runCommand("start");
-        break;
-      }
+      case "lobby": ui.sheet = null; command("lobby"); break;
     }
   });
   document.addEventListener("change", e => {
@@ -483,7 +427,7 @@ window.Duo = function (game) {
     const raw = sel.value;
     const v = o && typeof o.def === "number" ? +raw : raw;
     ui.opts[id] = v; store.set(K("opts"), ui.opts);
-    if (ui.mode === "online" && ui.isHost && ui.online && ui.online.status === "lobby") runCommand("opts", { [id]: v });
+    if (ui.isHost && ui.online && ui.online.status === "lobby") runCommand("opts", { [id]: v });
   });
   document.addEventListener("keydown", e => {
     if (e.key === "Escape" && ui.sheet) { ui.sheet = null; render(); }
@@ -498,10 +442,9 @@ window.Duo = function (game) {
   const saved = store.get(K("room"), null);
   if (ui.net) {
     if (urlRoom) {
-      ui.mode = "online";
       if (saved && saved.code === urlRoom && ui.name) openRoom(saved.code, saved.host);
       else ui.joinCode = urlRoom;
-    } else if (saved && ui.mode === "online" && ui.name) openRoom(saved.code, saved.host);
+    } else if (saved && ui.name) openRoom(saved.code, saved.host);
   }
   render();
   return { render, current, act };

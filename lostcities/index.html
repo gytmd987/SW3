@@ -173,7 +173,6 @@ const game = {
   title: "로스트 시티",
   mark: `<div class="mark-lc">${COMPASS}</div>`,
   tagline: "다섯 곳의 잃어버린 도시로 탐험대를 보내세요. 출발은 신중하게, 숫자는 꼭 올라가는 순서로.",
-  hidden: true,
   options: [{ id: "rounds", label: "라운드 수", def: 3, choices: [{ v: 1, label: "1라운드 (짧게)" }, { v: 3, label: "3라운드 (정식)" }] }],
   setup(players, opts) {
     const g = { rounds: +opts.rounds || 3, round: 0, totals: [0, 0], history: [], log: [], over: false };
@@ -236,15 +235,6 @@ const game = {
       return g;
     }
     return null;
-  },
-  viewer: g => g.turn,
-  needsCover: g => g.phase !== "roundEnd",
-  coverText(g, ctx) {
-    const l = g.last; if (!l) return "";
-    const nm = ctx.names[l.seat];
-    const did = l.kind === "play" ? `${CNAME[l.card.c]} 탐험에 ${cardEul(l.card)} 놓고` : `${cardEul(l.card)} 버리고`;
-    const drew = l.drew === "deck" ? "덱에서 한 장 가져갔어요." : l.drew ? `버린 더미에서 ${cardEul(l.drewCard)} 가져갔어요.` : "";
-    return `방금 ${nm} 님은 ${did} ${drew}`;
   },
   render(ctx) {
     const g = ctx.g, N = ctx.names;

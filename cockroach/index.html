@@ -151,7 +151,6 @@ const game = {
   title: "바퀴벌레 포커",
   mark: MARK,
   tagline: "\"이건 쥐야.\" 진짜일까, 거짓말일까? 같은 벌레 네 마리가 내 앞에 쌓이면 져요.",
-  hidden: true,
   options: [{ id: "hand", label: "손패", def: "full", choices: [{ v: "full", label: "32장씩 (정식)" }, { v: "short", label: "12장씩 (짧게)" }] }],
   setup(players, opts) {
     return { hands: deal(opts.hand), rows: [Array(8).fill(0), Array(8).fill(0)], turn: rnd(2), phase: "give", offer: null, last: null, loser: null, why: "", log: [] };
@@ -185,14 +184,6 @@ const game = {
       return g;
     }
     return null;
-  },
-  viewer: g => g.phase === "call" ? 1 - g.turn : g.turn,
-  needsCover: g => g.loser == null,
-  coverText(g, ctx) {
-    const N = ctx.names;
-    if (g.phase === "call") return `${N[g.offer.from]} 님이 카드를 건네며 "이건 ${ya(g.offer.claim)}"라고 했어요. 진짜일까요?`;
-    const l = g.last; if (!l) return "";
-    return `방금: ${N[l.to]} 님이 "${l.say === "true" ? "진짜" : "거짓말"}"이라고 했고, 실제는 ${ANI[l.card.a]}였어요. ${N[l.taker]} 님이 가져갔어요.`;
   },
   result(g, ctx) {
     if (g.loser == null) return null;

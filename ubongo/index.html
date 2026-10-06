@@ -53,10 +53,12 @@ body {
 .ub-status b { color: var(--fg); font-weight: 400; }
 .ub-status .done { color: var(--ok); }
 
-.ub-stage { position: relative; width: 100%; touch-action: none; user-select: none; -webkit-user-select: none; }
+.ub-stage { position: relative; width: 100%; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
 .ub-card { position: absolute; border-radius: 14px; background: var(--sand); box-shadow: 0 10px 24px rgba(30, 5, 20, .45), inset 0 0 0 3px #e4c78f; }
 .ub-hole { position: absolute; border-radius: 4px; background: var(--hole); box-shadow: inset 0 3px 6px rgba(0, 0, 0, .55); }
-.ub-piece { position: absolute; touch-action: none; cursor: grab; }
+/* 조각의 네모 상자 전체가 아니라 실제 칸만 손가락을 받는다 (ㄱ자 조각의 빈 귀퉁이 아래 칸을 누를 수 있게) */
+.ub-piece { position: absolute; touch-action: none; pointer-events: none; }
+.ub-piece .sq { pointer-events: auto; cursor: grab; }
 .ub-piece.drag { cursor: grabbing; z-index: 20; filter: drop-shadow(0 10px 10px rgba(0, 0, 0, .45)); }
 .ub-piece.sel .sq { box-shadow: inset 0 0 0 2px #fff, inset 0 -3px 0 rgba(0,0,0,.25); }
 .ub-piece .sq { position: absolute; border-radius: 4px; background: var(--pc); box-shadow: inset 0 -3px 0 rgba(0, 0, 0, .25), inset 0 2px 0 rgba(255, 255, 255, .35); }
@@ -162,7 +164,6 @@ function newRound(g) {
   g.rid = (g.rid || 0) + 1;
   g.puzzle = genPuzzle(g.k);
   g.times = [null, null];
-  g.active = 0;
   g.phase = "solving";
   g.award = null;
   return g;
@@ -186,25 +187,22 @@ const game = {
   title: "우봉고",
   mark: MARK,
   tagline: "같은 퍼즐을 동시에 풀어요. 조각을 돌리고 뒤집어 구멍을 먼저 채우는 사람이 보석을 더 가져가요.",
-  hidden: true,
   options: [
     { id: "k", label: "조각 수", def: 3, choices: [{ v: 3, label: "3조각 (60초)" }, { v: 4, label: "4조각 (90초)" }] },
     { id: "rounds", label: "퍼즐 수", def: 6, choices: [{ v: 4, label: "4판" }, { v: 6, label: "6판" }, { v: 9, label: "9판" }] },
   ],
   setup(players, opts, env) {
-    const g = { k: +opts.k || 3, rounds: +opts.rounds || 6, round: 0, gems: [0, 0], history: [], log: [], over: false, mode: env.local ? "turns" : "race" };
+    const g = { k: +opts.k || 3, rounds: +opts.rounds || 6, round: 0, gems: [0, 0], history: [], log: [], over: false };
     return newRound(g);
   },
   apply(g, seat, a, env) {
     const N = env.names;
     if (a.type === "solved" || a.type === "fail") {
       if (g.phase !== "solving" || g.times[seat] != null || a.rid !== g.rid) return null;
-      if (g.mode === "turns" && seat !== g.active) return null;
       if (a.type === "solved") {
         if (!validLayout(g.puzzle, a.layout) || !(a.ms > 0)) return null;
         g.times[seat] = Math.round(a.ms);
       } else g.times[seat] = -1;
-      if (g.mode === "turns" && g.active === 0) g.active = 1;
       if (g.times[0] != null && g.times[1] != null) score(g, N);
       return g;
     }
@@ -213,12 +211,6 @@ const game = {
       return newRound(g);
     }
     return null;
-  },
-  viewer: g => g.mode === "turns" ? g.active : 0,
-  needsCover: g => g.phase === "solving",
-  coverText(g, ctx) {
-    if (g.mode === "turns" && g.active === 1) return `${ctx.names[0]} 님은 ${g.times[0] >= 0 ? secs(g.times[0]) + "초에 풀었어요" : "시간 안에 못 풀었어요"}. 같은 퍼즐이에요. 버튼을 누르면 시계가 바로 돌아가요.`;
-    return `${g.round}번째 퍼즐이에요. 버튼을 누르면 시계가 바로 돌아가요.`;
   },
   result(g, ctx) {
     if (!g.over || g.phase !== "scored") return null;
@@ -231,14 +223,14 @@ const game = {
   render(ctx) {
     const g = ctx.g, N = ctx.names;
     const me = ctx.me < 0 ? 0 : ctx.me, op = 1 - me, spect = ctx.me < 0;
-    const solving = g.phase === "solving" && !spect && g.times[me] == null && (g.mode === "race" || g.active === me);
+    const solving = g.phase === "solving" && !spect && g.times[me] == null;
     const gems = `<div class="ub-gems">${[me, op].map((s, i) => `<span class="g">${GEM(i ? "#3fb6d9" : "#ffcf5a")} ${esc(N[s])} <b>${g.gems[s]}</b></span>`).join("")}</div>`;
     const top = `<div class="ub-top">${gems}<span class="ub-round">${g.round}/${g.rounds}번째 퍼즐 · ${g.k}조각</span></div>`;
 
     let mid = "";
     if (g.phase === "solving") {
-      const oppTxt = g.mode === "race" ? (g.times[op] == null ? "푸는 중…" : g.times[op] >= 0 ? `<span class="done">${secs(g.times[op])}초에 완성!</span>` : "시간 초과") : (g.active === 1 && op === 0 ? (g.times[0] >= 0 ? `${secs(g.times[0])}초` : "실패") : "");
-      const myTxt = g.times[me] == null ? (solving ? "" : "차례 기다리는 중") : g.times[me] >= 0 ? `<span class="done">${secs(g.times[me])}초에 완성!</span>` : "시간 초과";
+      const oppTxt = g.times[op] == null ? "푸는 중…" : g.times[op] >= 0 ? `<span class="done">${secs(g.times[op])}초에 완성!</span>` : "시간 초과";
+      const myTxt = g.times[me] == null ? "" : g.times[me] >= 0 ? `<span class="done">${secs(g.times[me])}초에 완성!</span>` : "시간 초과";
       mid = `<div class="ub-timer" id="ub-timer"><i style="width:100%"></i><span>${solving ? "" : "—"}</span></div>
         ${myTxt || oppTxt ? `<div class="ub-status"><span>${myTxt ? `나 <b>${myTxt}</b>` : ""}</span>${oppTxt ? `<span>${esc(N[op])} <b>${oppTxt}</b></span>` : ""}</div>` : ""}`;
     }
@@ -247,7 +239,7 @@ const game = {
       const h = g.history[g.history.length - 1];
       body = `<div class="duo-panel"><h2>${h.round}번째 퍼즐 결과</h2>
         <table class="duo-table"><tbody>${[0, 1].map(s => `<tr><td>${esc(N[s])}</td><td class="num">${h.times[s] >= 0 ? secs(h.times[s]) + "초" : "못 풀었어요"}</td><td class="num">${h.award[s] ? `보석 +${h.award[s]}` : ""}</td></tr>`).join("")}</tbody></table>
-        ${g.over || spect ? "" : `<div class="duo-row"><button class="duo-btn primary" data-a="next"><b>다음 퍼즐</b><span>${g.mode === "race" ? "누르면 둘 다 바로 시작해요" : `${esc(N[0])} 님부터 풀어요`}</span></button></div>`}</div>
+        ${g.over || spect ? "" : `<div class="duo-row"><button class="duo-btn primary" data-a="next"><b>다음 퍼즐</b><span>누르면 둘 다 바로 시작해요</span></button></div>`}</div>
         <div class="ub-stage" id="ub-stage" data-show="solution"></div>`;
     } else if (solving) {
       body = `<div class="ub-stage" id="ub-stage"></div>
@@ -256,7 +248,7 @@ const game = {
     } else if (!spect && g.times[me] != null) {
       body = `<div class="ub-stage" id="ub-stage" data-show="solution"></div><p class="ub-say">${g.times[me] >= 0 ? "완성!" : "시간이 다 됐어요."} ${esc(N[op])} 님이 끝나길 기다리는 중…</p>`;
     } else {
-      body = `<div class="ub-hidden">${esc(N[g.active])} 님이 푸는 중이에요</div>`;
+      body = `<div class="ub-hidden">두 사람이 퍼즐을 푸는 중이에요</div>`;
     }
     return top + mid + body;
   },
@@ -265,15 +257,14 @@ const game = {
     clearInterval(ui.timerId);
     const stage = root.querySelector("#ub-stage");
     const me = ctx.me < 0 ? 0 : ctx.me;
-    const ukey = g.rid + ":" + (g.mode === "turns" ? g.active : "race");
+    const ukey = g.rid;
     if (ui.key !== ukey) {
-      ui.key = ukey; ui.sel = 0; ui.done = false; ui.sent = false; ui.start = null;
+      ui.key = ukey; ui.sel = 0; ui.done = false; ui.sent = false; ui.start = null; ui.drag = null;
       ui.pieces = g.puzzle.pieces.map(k => ({ k, o: norm(PIECES[k].cells), at: null }));
     }
     if (stage && stage.dataset.show === "solution") { drawStage(stage, ctx, true); return; }
     if (!stage) return;
     drawStage(stage, ctx, false);
-    if (ctx.covered) return;                              // 화면이 가려진 동안은 시계를 돌리지 않는다
     if (ui.start == null) ui.start = performance.now();
     const limit = ROUND_MS[g.k];
     const bar = root.querySelector("#ub-timer i"), txt = root.querySelector("#ub-timer span");
@@ -308,10 +299,8 @@ const game = {
   <p>정한 수의 퍼즐을 다 풀면 보석이 많은 사람이 이겨요.</p>
   <h3>조각 모양</h3>
   <div class="rule-pieces">${KEYS.map(k => pieceSVG(k)).join("")}</div>
-  <h3>한 폰으로 할 때</h3>
-  <p>같은 퍼즐을 한 사람씩 차례로 풀고 걸린 시간을 비교해요. 내 차례 화면을 여는 순간 시계가 돌아가요.</p>
   <h3>조작</h3>
-  <ul><li>조각을 끌어서 구멍 위에 놓으면 칸에 딱 맞게 붙어요. 맞지 않으면 원래 자리로 돌아가요.</li>
+  <ul><li>조각을 끌어서 구멍 위에 놓으면 칸에 딱 맞게 붙어요. 맞지 않으면 원래 자리로 돌아가요. 손가락으로 끌 때는 조각이 손가락 조금 위에 떠서 따라와요.</li>
   <li>조각을 톡 누르면 오른쪽으로 90° 돌아가요. "뒤집기"로 좌우를 뒤집어요.</li>
   <li>놓인 조각을 끌어내면 다시 뺄 수 있어요.</li></ul>`,
 };
@@ -348,41 +337,67 @@ function drawStage(stage, ctx, solution) {
     return `<div class="ub-piece ${p.at ? "placed" : ""} ${!solution && ui.sel === i ? "sel" : ""}" data-i="${i}" style="${style}" aria-label="조각 ${i + 1}">${sq}</div>`;
   }).join("");
   stage.innerHTML = `<div class="ub-card ${ui.done ? "ub-solved" : ""}" style="left:${cardX}px;top:${cardY}px;width:${cardW}px;height:${cardH}px"></div>${holes}${pieces}`;
+  stage._geo = { bx, by, cs };
   if (solution) return;
-  const want = new Set(P.cells.map(x => x.join(",")));
+  wireStage(stage, ctx);
+}
 
-  stage.querySelectorAll(".ub-piece").forEach(el => {
-    el.addEventListener("pointerdown", ev => {
-      if (ui.done) return;
-      ev.preventDefault();
-      const i = +el.dataset.i, p = ui.pieces[i];
-      const sr = stage.getBoundingClientRect();
-      const startX = ev.clientX, startY = ev.clientY;
-      const ox = el.offsetLeft, oy = el.offsetTop;
-      let moved = false;
-      el.setPointerCapture(ev.pointerId);
-      ui.sel = i;
-      stage.querySelectorAll(".ub-piece").forEach(n => n.classList.toggle("sel", n === el));
-      const move = e => {
-        const dx = e.clientX - startX, dy = e.clientY - startY;
-        if (!moved && Math.hypot(dx, dy) > 6) { moved = true; el.classList.add("drag"); }
-        if (moved) { el.style.left = (ox + dx) + "px"; el.style.top = (oy + dy) + "px"; }
-      };
-      const up = e => {
-        el.removeEventListener("pointermove", move); el.removeEventListener("pointerup", up); el.removeEventListener("pointercancel", up);
-        if (!moved) { p.o = rot(p.o); p.at = null; drawStage(stage, ctx, false); return; }
-        const left = el.offsetLeft, top = el.offsetTop;
-        const c0 = Math.round((left - bx) / cs), r0 = Math.round((top - by) / cs);
-        const others = new Set();
-        ui.pieces.forEach((q, j) => { if (j !== i && q.at) q.o.forEach(([r, c]) => others.add((r + q.at[0]) + "," + (c + q.at[1]))); });
-        const fits = p.o.every(([r, c]) => { const s = (r + r0) + "," + (c + c0); return want.has(s) && !others.has(s); });
-        p.at = fits ? [r0, c0] : null;
-        drawStage(stage, ctx, false);
-        if (fits && ui.pieces.every(q => q.at)) finish(ctx);
-      };
-      el.addEventListener("pointermove", move); el.addEventListener("pointerup", up); el.addEventListener("pointercancel", up);
-    });
+/* 끌기: 아이폰 사파리는 손가락 움직임을 스크롤로 가져가 버리면 pointercancel을 보내서
+   끌던 조각이 튕겨 나간다. 조각을 만지는 순간 touchstart/touchmove를 막아 스크롤이
+   시작되지 않게 하고, 움직임은 window에서 받는다. */
+let curStage = null;                  // 지금 화면에 있는 판 (프레임워크가 다시 그리면 바뀐다)
+function wireStage(stage, ctx) {
+  stage._ctx = ctx; curStage = stage;
+  if (!windowWired) { windowWired = true; window.addEventListener("pointermove", onMove, { passive: true }); window.addEventListener("pointerup", onEnd); window.addEventListener("pointercancel", onEnd); }
+  if (stage._wired) return;
+  stage._wired = true;
+  const blockTouch = e => { if (e.target.closest && e.target.closest(".ub-piece")) e.preventDefault(); };
+  stage.addEventListener("touchstart", blockTouch, { passive: false });
+  stage.addEventListener("touchmove", e => { if (stage._ctx.ui.drag) e.preventDefault(); }, { passive: false });
+  stage.addEventListener("gesturestart", e => e.preventDefault());
+  stage.addEventListener("contextmenu", e => { if (e.target.closest(".ub-piece")) e.preventDefault(); });
+  stage.addEventListener("pointerdown", ev => {
+    const ctx = stage._ctx, ui = ctx.ui;
+    const el = ev.target.closest(".ub-piece");
+    if (!el || ui.done || ui.drag) return;
+    ev.preventDefault();
+    const i = +el.dataset.i;
+    const lift = ev.pointerType === "touch" ? Math.round(stage._geo.cs * .9) : 0;   // 손가락에 가리지 않게
+    ui.drag = { stage, id: ev.pointerId, i, el, x0: ev.clientX, y0: ev.clientY, ox: el.offsetLeft, oy: el.offsetTop, lift, moved: false, t0: performance.now() };
+    ui.sel = i;
+    stage.querySelectorAll(".ub-piece").forEach(n => n.classList.toggle("sel", n === el));
   });
+}
+let windowWired = false;
+function onMove(ev) {
+    const stage = curStage; if (!stage) return;
+    const ui = stage._ctx.ui, d = ui.drag;
+    if (!d || ev.pointerId !== d.id) return;
+    const dx = ev.clientX - d.x0, dy = ev.clientY - d.y0;
+    if (!d.moved && Math.hypot(dx, dy) > 8) { d.moved = true; d.el.classList.add("drag"); }
+    if (d.moved) { d.el.style.left = (d.ox + dx) + "px"; d.el.style.top = (d.oy + dy - d.lift) + "px"; }
+}
+function onEnd(ev) {
+    const stage = curStage; if (!stage) return;
+    const ctx = stage._ctx, ui = ctx.ui, d = ui.drag;
+    if (!d || ev.pointerId !== d.id) return;
+    ui.drag = null;
+    const p = ui.pieces[d.i];
+    if (d.stage !== stage || !d.el.isConnected) { drawStage(stage, ctx, false); return; }   // 끄는 사이 화면이 새로 그려졌으면 원래대로
+    if (!d.moved) {
+      if (ev.type === "pointerup" && performance.now() - d.t0 < 500) { p.o = rot(p.o); p.at = null; }
+      drawStage(stage, ctx, false); ctx.flush(); return;
+    }
+    const { bx, by, cs } = stage._geo;
+    const c0 = Math.round((d.el.offsetLeft - bx) / cs), r0 = Math.round((d.el.offsetTop - by) / cs);
+    const want = new Set(ctx.g.puzzle.cells.map(x => x.join(",")));
+    const others = new Set();
+    ui.pieces.forEach((q, j) => { if (j !== d.i && q.at) q.o.forEach(([r, c]) => others.add((r + q.at[0]) + "," + (c + q.at[1]))); });
+    const fits = p.o.every(([r, c]) => { const k = (r + r0) + "," + (c + c0); return want.has(k) && !others.has(k); });
+    p.at = fits ? [r0, c0] : null;
+    drawStage(stage, ctx, false);
+    if (fits && ui.pieces.every(q => q.at)) finish(ctx);
+    ctx.flush();                          // 끄는 동안 미뤄 둔 화면 갱신(상대 진행 상황 등)
 }
 function finish(ctx) {
   const ui = ctx.ui, g = ctx.g;
@@ -394,7 +409,14 @@ function finish(ctx) {
   const st = document.getElementById("ub-stage"); if (st) st.querySelector(".ub-card").classList.add("ub-solved");
   setTimeout(() => ctx.act({ type: "solved", rid: g.rid, ms, layout }), 500);
 }
-addEventListener("resize", () => { const st = document.getElementById("ub-stage"); if (st && window.__ubCtx) drawStage(st, window.__ubCtx, st.dataset.show === "solution"); });
+// 아이폰은 스크롤로 주소창이 접힐 때도 resize가 와서, 폭이 바뀐 경우에만 다시 그린다
+let lastW = 0;
+addEventListener("resize", () => {
+  const st = document.getElementById("ub-stage");
+  if (!st || !window.__ubCtx || window.__ubCtx.ui.drag || st.clientWidth === lastW) return;
+  lastW = st.clientWidth; drawStage(st, window.__ubCtx, st.dataset.show === "solution");
+});
+game.holdRender = () => !!(curStage && curStage.isConnected && curStage._ctx.ui.drag);
 const _mounted = game.mounted;
 game.mounted = (root, ctx) => { window.__ubCtx = ctx; _mounted(root, ctx); };
 Duo(game);
