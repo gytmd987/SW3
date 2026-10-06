@@ -7,6 +7,9 @@
 | 하나비 | `hanabi/` (원본은 `hanabi.html`, `./build.sh`로 생성) |
 | 로스트 시티 | `lostcities/` |
 | 젝스님트 | `6nimmt/` |
+| 쿼리도 | `quoridor/` |
+| 우봉고 | `ubongo/` |
+| 스플렌더 대결 | `splendor-duel/` (규칙 엔진은 `engine.js`) |
 
 - `shared/duo.js`, `shared/duo.css` — 게임들이 같이 쓰는 뼈대: 방 코드 온라인 연결(PeerJS), 한 폰 모드, 로비, 규칙 창
 - `vendor/peerjs.min.js` — PeerJS 1.5.5
@@ -17,3 +20,5 @@
 
 ## 배포
 `./deploy.sh` — 사이트 파일을 `gh-pages` 브랜치로 올린다.
+
+스플렌더 대결의 카드 구성(비용·점수·능력)은 원작 구조를 따라 새로 짠 것으로, 실제 카드 목록과 다르다.

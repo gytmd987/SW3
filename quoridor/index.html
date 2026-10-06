@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>쿼리도</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Gowun+Dodum&display=swap">
+<link rel="stylesheet" href="../shared/duo.css">
+<style>
+/* Layout: a walnut board with maple walls fills the width; wall counts and the move/wall switch sit above and below it. */
+:root {
+  color-scheme: dark;
+  --bg: #1d1712;
+  --bg2: #2a2119;
+  --panel: rgba(255, 240, 215, .06);
+  --line: rgba(232, 200, 143, .2);
+  --fg: #f1e6d3;
+  --muted: #b39f84;
+  --accent: #e8c88f;
+  --accent-fg: #2a1a0e;
+  --danger: #ff7a6b;
+  --ok: #8fd18a;
+  --sheet: #2a2119;
+  --scrim: rgba(10, 6, 2, .6);
+  --f-display: "Black Han Sans", "Gowun Dodum", sans-serif;
+  --f-body: "Gowun Dodum", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --gold: #f2c14e;
+  --onyx: #2c2b33;
+  --maple: #e8c88f;
+}
+body {
+  background-color: var(--bg);
+  background-image: radial-gradient(110% 70% at 50% 0%, #2c231b, var(--bg));
+  background-attachment: fixed;
+}
+.duo-title { color: var(--maple); font-weight: 400; letter-spacing: .02em; }
+.mark-q { width: 120px; height: 120px; }
+
+.q-who { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); }
+.q-who b { font-family: var(--f-display); font-weight: 400; font-size: 18px; color: var(--fg); }
+.q-who .pawn { width: 18px; height: 18px; border-radius: 50%; flex: none; }
+.q-who .turn { margin-left: auto; font-size: 12px; padding: 2px 10px; border-radius: 999px; background: var(--accent); color: var(--accent-fg); }
+.q-left { display: flex; gap: 3px; }
+.q-left i { width: 4px; height: 16px; border-radius: 1px; background: var(--maple); box-shadow: 0 1px 0 #7a5a33; }
+.q-left i.used { background: rgba(232, 200, 143, .15); box-shadow: none; }
+.p0 { background: radial-gradient(circle at 35% 30%, #fff2c2, var(--gold) 45%, #a8781a); box-shadow: 0 2px 4px rgba(0,0,0,.6); }
+.p1 { background: radial-gradient(circle at 35% 30%, #8a8a98, var(--onyx) 50%, #121216); box-shadow: 0 2px 4px rgba(0,0,0,.6), inset 0 0 0 1.5px #c9c9d6; }
+
+.qb { position: relative; width: 100%; max-width: 520px; margin: 0 auto; aspect-ratio: 1; border-radius: 14px; padding: 3.2%; box-sizing: border-box;
+  background: linear-gradient(135deg, #4a2f1b, #3a2414); box-shadow: inset 0 0 0 2px #6b4a2f, 0 14px 30px rgba(0, 0, 0, .5); }
+.qb-in { position: relative; width: 100%; height: 100%; }
+.qc { position: absolute; border-radius: 4px; background: linear-gradient(145deg, #7d5636, #6a4529); box-shadow: inset 0 -2px 0 rgba(0,0,0,.25), inset 0 1px 0 rgba(255,255,255,.08); border: none; padding: 0; }
+.qc.goal0 { background: linear-gradient(145deg, #8a6538, #74522c); }
+.qc.goal1 { background: linear-gradient(145deg, #6c5246, #574036); }
+.qc.can { cursor: pointer; }
+.qc.can::after { content: ""; position: absolute; inset: 32%; border-radius: 50%; background: rgba(242, 193, 78, .75); box-shadow: 0 0 10px rgba(242, 193, 78, .8); }
+.qc.can:hover::after { inset: 24%; }
+.qc.from { box-shadow: inset 0 0 0 2px rgba(242, 193, 78, .45); }
+.qpawn { position: absolute; border-radius: 50%; pointer-events: none; transition: left .25s ease, top .25s ease; }
+.qpawn::after { content: ""; position: absolute; inset: 22%; border-radius: 50%; border: 1.5px solid rgba(255, 255, 255, .35); }
+.qw { position: absolute; border-radius: 3px; background: linear-gradient(180deg, #f3dcae, var(--maple) 50%, #c9a165); box-shadow: 0 2px 4px rgba(0,0,0,.55); pointer-events: none; }
+.qw.last { box-shadow: 0 0 0 2px rgba(255, 255, 255, .7), 0 0 14px rgba(232, 200, 143, .9); }
+.qw.preview { opacity: .85; background: repeating-linear-gradient(45deg, #fff2cf 0 4px, #e8c88f 4px 8px); }
+.qw.bad { background: repeating-linear-gradient(45deg, #ff7a6b 0 4px, #a2392e 4px 8px); }
+.qx { position: absolute; transform: translate(-50%, -50%); width: 9%; aspect-ratio: 1; border-radius: 50%; border: none; padding: 0; background: rgba(232, 200, 143, .18); }
+.qx::after { content: ""; position: absolute; inset: 35%; border-radius: 50%; background: rgba(232, 200, 143, .7); }
+.qx.on { background: rgba(232, 200, 143, .45); }
+.qx:hover { background: rgba(232, 200, 143, .35); }
+
+.q-modes { display: flex; gap: 6px; }
+.q-modes button { flex: 1; padding: 10px; border-radius: 12px; border: 1px solid var(--line); background: transparent; font-size: 14px; }
+.q-modes button[aria-pressed=true] { border-color: var(--accent); color: var(--accent); background: var(--panel); }
+.q-say { margin: 0; text-align: center; font-size: 14px; min-height: 1.5em; text-wrap: balance; }
+.q-say em { font-style: normal; color: var(--accent); }
+.q-say .bad { color: var(--danger); }
+.q-wallbar { display: flex; gap: 8px; }
+.q-wallbar .duo-btn { flex: 1; }
+.q-legend { display: flex; justify-content: center; gap: 14px; font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="duo" id="app"></div>
+<div id="layer"></div>
+<script src="../shared/duo.js"></script>
+<script>
+(() => {
+"use strict";
+const { esc } = DuoUtil;
+const N9 = 9, G = 0.24, U = 100 / (N9 + (N9 - 1) * G);
+const GOAL = [0, 8];
+const DIRS = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+
+/* ───── rules engine ───── */
+const wallSet = walls => { const s = new Set(); walls.forEach(w => s.add(w.o + w.r + "," + w.c)); return s; };
+function blocked(ws, r, c, dr, dc) {
+  const H = (a, b) => ws.has("h" + a + "," + b), V = (a, b) => ws.has("v" + a + "," + b);
+  if (dr === 1) return H(r, c) || H(r, c - 1);
+  if (dr === -1) return H(r - 1, c) || H(r - 1, c - 1);
+  if (dc === 1) return V(r, c) || V(r - 1, c);
+  return V(r, c - 1) || V(r - 1, c - 1);
+}
+const inside = (r, c) => r >= 0 && r < N9 && c >= 0 && c < N9;
+const canStep = (ws, r, c, dr, dc) => inside(r + dr, c + dc) && !blocked(ws, r, c, dr, dc);
+function legalMoves(g, seat) {
+  const ws = wallSet(g.walls);
+  const [r, c] = g.pos[seat], [or, oc] = g.pos[1 - seat];
+  const out = [];
+  for (const [dr, dc] of DIRS) {
+    if (!canStep(ws, r, c, dr, dc)) continue;
+    const nr = r + dr, nc = c + dc;
+    if (nr !== or || nc !== oc) { out.push([nr, nc]); continue; }
+    if (canStep(ws, nr, nc, dr, dc)) { out.push([nr + dr, nc + dc]); continue; }
+    for (const [er, ec] of dr ? [[0, -1], [0, 1]] : [[-1, 0], [1, 0]]) {
+      if (canStep(ws, nr, nc, er, ec)) out.push([nr + er, nc + ec]);
+    }
+  }
+  return out;
+}
+function hasPath(ws, [r0, c0], goalRow) {
+  const seen = new Set([r0 * 9 + c0]); const q = [[r0, c0]];
+  while (q.length) {
+    const [r, c] = q.shift();
+    if (r === goalRow) return true;
+    for (const [dr, dc] of DIRS) {
+      if (!canStep(ws, r, c, dr, dc)) continue;
+      const k = (r + dr) * 9 + c + dc;
+      if (!seen.has(k)) { seen.add(k); q.push([r + dr, c + dc]); }
+    }
+  }
+  return false;
+}
+function wallProblem(g, seat, w) {
+  if (g.left[seat] <= 0) return "벽을 다 썼어요";
+  if (w.r < 0 || w.r > 7 || w.c < 0 || w.c > 7 || (w.o !== "h" && w.o !== "v")) return "놓을 수 없는 자리예요";
+  const ws = wallSet(g.walls);
+  if (ws.has("h" + w.r + "," + w.c) || ws.has("v" + w.r + "," + w.c)) return "다른 벽과 겹치거나 엇갈려요";
+  if (w.o === "h" && (ws.has("h" + w.r + "," + (w.c - 1)) || ws.has("h" + w.r + "," + (w.c + 1)))) return "다른 벽과 겹쳐요";
+  if (w.o === "v" && (ws.has("v" + (w.r - 1) + "," + w.c) || ws.has("v" + (w.r + 1) + "," + w.c))) return "다른 벽과 겹쳐요";
+  ws.add(w.o + w.r + "," + w.c);
+  if (!hasPath(ws, g.pos[0], GOAL[0]) || !hasPath(ws, g.pos[1], GOAL[1])) return "길을 완전히 막으면 안 돼요";
+  return "";
+}
+
+/* ───── board geometry (percent of the inner board) ───── */
+const cellXY = (r, c) => ({ x: c * (1 + G) * U, y: r * (1 + G) * U });
+function wallRect(w) {
+  if (w.o === "h") return { x: w.c * (1 + G) * U, y: ((w.r + 1) * (1 + G) - G) * U, w: (2 + G) * U, h: G * U };
+  return { x: ((w.c + 1) * (1 + G) - G) * U, y: w.r * (1 + G) * U, w: G * U, h: (2 + G) * U };
+}
+const pct = v => v.toFixed(3) + "%";
+
+const MARK = `<svg class="mark-q" viewBox="0 0 120 120" aria-hidden="true"><rect x="4" y="4" width="112" height="112" rx="12" fill="#3a2414"/>${Array.from({ length: 25 }, (_, i) => `<rect x="${12 + (i % 5) * 20}" y="${12 + Math.floor(i / 5) * 20}" width="16" height="16" rx="2" fill="#7d5636"/>`).join("")}<rect x="30" y="49" width="36" height="4" rx="1.5" fill="#e8c88f"/><rect x="69" y="30" width="4" height="36" rx="1.5" fill="#e8c88f"/><circle cx="60" cy="100" r="7" fill="#f2c14e"/><circle cx="60" cy="20" r="7" fill="#2c2b33" stroke="#c9c9d6" stroke-width="1.5"/></svg>`;
+
+const game = {
+  id: "quoridor",
+  title: "쿼리도",
+  mark: MARK,
+  tagline: "말을 한 칸 옮기거나 벽을 세워 상대의 길을 돌리세요. 먼저 반대편 끝에 닿으면 이겨요.",
+  hidden: false,
+  setup(players) {
+    return { pos: [[8, 4], [0, 4]], walls: [], left: [10, 10], turn: Math.random() < .5 ? 0 : 1, winner: null, last: null, log: [] };
+  },
+  apply(g, seat, a, env) {
+    if (g.winner != null || seat !== g.turn) return null;
+    const N = env.names;
+    if (a.type === "move") {
+      if (!legalMoves(g, seat).some(([r, c]) => r === a.r && c === a.c)) return null;
+      g.last = { type: "move", seat, from: g.pos[seat].slice(), to: [a.r, a.c] };
+      g.pos[seat] = [a.r, a.c];
+      g.log.push(`${N[seat]} 님이 말을 옮겼어요`);
+      if (a.r === GOAL[seat]) { g.winner = seat; g.log.push(`${N[seat]} 님이 건너편에 도착했어요!`); return g; }
+    } else if (a.type === "wall") {
+      const w = { r: a.r, c: a.c, o: a.o };
+      if (wallProblem(g, seat, w)) return null;
+      g.walls.push(w); g.left[seat] -= 1;
+      g.last = { type: "wall", seat, wall: w };
+      g.log.push(`${N[seat]} 님이 ${w.o === "h" ? "가로" : "세로"} 벽을 세웠어요 (남은 벽 ${g.left[seat]}개)`);
+    } else return null;
+    g.turn = 1 - seat;
+    return g;
+  },
+  viewer: g => g.turn,
+  result(g, ctx) {
+    if (g.winner == null) return null;
+    return { title: `${esc(ctx.names[g.winner])} 님 승리!`, html: `<p class="sub" style="text-align:center;margin:0">말이 먼저 건너편 끝줄에 닿았어요. 사용한 벽 ${10 - g.left[g.winner]}개.</p>` };
+  },
+  render(ctx) {
+    const g = ctx.g, N = ctx.names;
+    const me = ctx.me < 0 ? 0 : ctx.me, op = 1 - me, spect = ctx.me < 0;
+    const flip = !ctx.local && me === 1;           // 온라인에서는 내 말이 항상 아래쪽
+    const R = r => flip ? 8 - r : r, C = c => flip ? 8 - c : c;
+    const myTurn = !spect && g.turn === me && g.winner == null;
+    const mode = ctx.ui.mode || "move";
+    const moves = myTurn && mode === "move" ? legalMoves(g, me) : [];
+
+    let cells = "";
+    for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
+      const can = moves.some(([a, b]) => a === r && b === c);
+      const p = cellXY(R(r), C(c));
+      const goal = r === GOAL[me] ? "goal" + me : r === GOAL[op] ? "goal" + op : "";
+      const from = g.last && g.last.type === "move" && g.last.from[0] === r && g.last.from[1] === c ? "from" : "";
+      const style = `left:${pct(p.x)};top:${pct(p.y)};width:${pct(U)};height:${pct(U)}`;
+      cells += can ? `<button class="qc can ${goal}" data-a="mv" data-r="${r}" data-c="${c}" style="${style}" aria-label="${r + 1}행 ${c + 1}열로 이동"></button>`
+        : `<span class="qc ${goal} ${from}" style="${style}"></span>`;
+    }
+    const pawns = [0, 1].map(s => { const [r, c] = g.pos[s]; const p = cellXY(R(r), C(c)); return `<span class="qpawn p${s}" style="left:${pct(p.x + U * .14)};top:${pct(p.y + U * .14)};width:${pct(U * .72)};height:${pct(U * .72)}" aria-label="${esc(N[s])} 말"></span>`; }).join("");
+    const disp = w => flip ? { r: 7 - w.r, c: 7 - w.c, o: w.o } : w;
+    const walls = g.walls.map(w => { const q = wallRect(disp(w)); const last = g.last && g.last.type === "wall" && g.last.wall.r === w.r && g.last.wall.c === w.c && g.last.wall.o === w.o; return `<span class="qw ${last ? "last" : ""}" style="left:${pct(q.x)};top:${pct(q.y)};width:${pct(q.w)};height:${pct(q.h)}"></span>`; }).join("");
+
+    let hot = "", preview = "", problem = "";
+    if (myTurn && mode === "wall") {
+      const pv = ctx.ui.pv;
+      for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) {
+        const x = ((C(c) + (flip ? -1 : 0) + 1) * (1 + G) - G / 2) * U, y = ((R(r) + (flip ? -1 : 0) + 1) * (1 + G) - G / 2) * U;
+        const on = pv && pv.r === r && pv.c === c;
+        hot += `<button class="qx ${on ? "on" : ""}" data-a="x" data-r="${r}" data-c="${c}" style="left:${pct(x)};top:${pct(y)}" aria-label="교차점 ${r + 1},${c + 1}"></button>`;
+      }
+      if (pv) {
+        problem = wallProblem(g, me, pv);
+        const q = wallRect(disp(pv));
+        preview = `<span class="qw preview ${problem ? "bad" : ""}" style="left:${pct(q.x)};top:${pct(q.y)};width:${pct(q.w)};height:${pct(q.h)}"></span>`;
+      }
+    }
+
+    const leftBar = s => `<span class="q-left" aria-label="남은 벽 ${g.left[s]}개">${Array.from({ length: 10 }, (_, i) => `<i class="${i < g.left[s] ? "" : "used"}"></i>`).join("")}</span>`;
+    const who = s => `<div class="q-who"><span class="pawn p${s}"></span><b>${s === me && !spect ? "나 (" + esc(N[s]) + ")" : esc(N[s])}</b>${leftBar(s)}${g.turn === s && g.winner == null ? `<span class="turn">차례</span>` : ""}</div>`;
+
+    let say;
+    if (g.winner != null) say = `<em>${esc(N[g.winner])}</em> 님이 건너편에 도착했어요!`;
+    else if (spect) say = `${esc(N[g.turn])} 님 차례`;
+    else if (!myTurn) say = ctx.local ? "" : `${esc(N[op])} 님이 고민 중이에요…`;
+    else if (mode === "move") say = "노란 점이 있는 칸을 눌러 말을 옮기세요";
+    else if (!ctx.ui.pv) say = g.left[me] ? "벽을 세울 교차점을 누르세요. 같은 점을 한 번 더 누르면 방향이 바뀌어요" : `<span class="bad">벽을 다 썼어요. 말을 옮겨야 해요</span>`;
+    else say = problem ? `<span class="bad">${problem}</span>` : `<em>${ctx.ui.pv.o === "h" ? "가로" : "세로"} 벽</em> — 맞으면 "여기에 세우기"를 누르세요`;
+    if (ctx.local && myTurn) say = `<b>${esc(N[me])}</b> 님 차례 · ` + say;
+
+    const modes = myTurn ? `<div class="q-modes" role="group" aria-label="할 일">
+      <button data-a="mode" data-v="move" aria-pressed="${mode === "move"}">말 옮기기</button>
+      <button data-a="mode" data-v="wall" aria-pressed="${mode === "wall"}" ${g.left[me] ? "" : "disabled"}>벽 세우기 (${g.left[me]})</button></div>` : "";
+    const wallbar = myTurn && mode === "wall" && ctx.ui.pv ? `<div class="q-wallbar">
+      <button class="duo-btn" data-a="rot"><b>방향 바꾸기</b><span>지금: ${ctx.ui.pv.o === "h" ? "가로" : "세로"}</span></button>
+      <button class="duo-btn primary" data-a="place" ${problem ? "disabled" : ""}><b>여기에 세우기</b><span>벽 1개를 써요</span></button></div>` : "";
+
+    const top = ctx.local ? 1 : op, bottom = ctx.local ? 0 : me;
+    return `${who(top)}
+      <div class="qb"><div class="qb-in">${cells}${walls}${preview}${pawns}${hot}</div></div>
+      ${who(bottom)}
+      <p class="q-say">${say}</p>
+      ${modes}${wallbar}`;
+  },
+  onClick(el, ctx) {
+    const a = el.dataset.a, g = ctx.g;
+    if (a === "mv") { ctx.act({ type: "move", r: +el.dataset.r, c: +el.dataset.c }); return; }
+    if (a === "mode") { ctx.ui.mode = el.dataset.v; ctx.ui.pv = null; ctx.rerender(); return; }
+    if (a === "x") {
+      const r = +el.dataset.r, c = +el.dataset.c, pv = ctx.ui.pv;
+      if (pv && pv.r === r && pv.c === c) pv.o = pv.o === "h" ? "v" : "h";
+      else ctx.ui.pv = { r, c, o: pv ? pv.o : "h" };
+      ctx.rerender(); return;
+    }
+    if (a === "rot" && ctx.ui.pv) { ctx.ui.pv.o = ctx.ui.pv.o === "h" ? "v" : "h"; ctx.rerender(); return; }
+    if (a === "place" && ctx.ui.pv) { const pv = ctx.ui.pv; if (ctx.act({ type: "wall", r: pv.r, c: pv.c, o: pv.o })) { ctx.ui.pv = null; ctx.ui.mode = "move"; } }
+  },
+  rules: `
+  <p>9×9 판 위에서 내 말을 반대편 끝줄로 먼저 보내면 이기는 게임이에요. 상대를 막는 벽을 얼마나 잘 쓰느냐가 승부예요.</p>
+  <h3>준비</h3>
+  <p>각자 자기 쪽 끝줄 가운데에 말을 두고, 벽을 10개씩 가져요.</p>
+  <h3>내 차례 (둘 중 하나)</h3>
+  <ol>
+    <li><b>말 옮기기</b>: 위·아래·왼쪽·오른쪽으로 한 칸. 대각선은 안 돼요. 벽을 넘어갈 수 없어요.</li>
+    <li><b>벽 세우기</b>: 칸 사이 홈에 두 칸 길이의 벽을 가로나 세로로 세워요. 벽끼리 겹치거나 열십자로 엇갈릴 수 없어요.</li>
+  </ol>
+  <h3>꼭 지켜야 할 것</h3>
+  <p>벽으로 상대(또는 나)의 길을 <b>완전히 막으면 안 돼요</b>. 돌아가더라도 끝줄까지 가는 길이 하나는 남아 있어야 해요. 이 화면은 그런 벽을 빨간색으로 보여 주고 세울 수 없게 해요.</p>
+  <h3>말끼리 마주쳤을 때</h3>
+  <ul><li>바로 앞에 상대 말이 있으면 그 말을 <b>뛰어넘어</b> 뒤 칸으로 갈 수 있어요.</li>
+  <li>상대 말 뒤가 벽이나 판 끝이라 넘을 수 없으면, 상대 말의 <b>왼쪽이나 오른쪽 대각선</b> 칸으로 갈 수 있어요.</li></ul>
+  <h3>이 화면 보는 법</h3>
+  <ul><li>"말 옮기기"에서는 갈 수 있는 칸에 노란 점이 떠요. 눌러서 옮기면 바로 차례가 끝나요.</li>
+  <li>"벽 세우기"에서는 칸 사이 교차점을 눌러 벽 위치를 고르고, 같은 점을 한 번 더 누르면 가로·세로가 바뀌어요. "여기에 세우기"로 확정해요.</li>
+  <li>각자 이름 옆의 막대가 남은 벽 개수예요. 방금 세운 벽은 빛나요.</li></ul>`,
+};
+Duo(game);
+})();
+</script>
+</body>
+</html>

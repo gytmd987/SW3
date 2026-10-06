@@ -13,7 +13,7 @@
  *   onClick(el, ctx)                          for elements with data-a="…"
  *   mounted(root, ctx) (optional)             after each render (drag & drop etc.)
  *   changed(prev, g, ctx) (optional)          after a new state arrives (animations)
- *   result(g) -> {title, html} | null         game over summary
+ *   result(g, ctx) -> {title, html} | null    game over summary
  *   coverText(g) -> string (optional)         line shown on the pass-the-phone screen
  *
  * Online play: the room creator's page is the authority. The guest sends its moves as
@@ -336,12 +336,18 @@ window.Duo = function (game) {
     const me = mySeat(s);
     return {
       s, g: s.game, me, local: ui.mode === "local", names: names(s), opts: s.opts || ui.opts,
+      covered: coverShown(s),
       ui: ui.g, act, esc, toast, josa,
       rerender: render,
       online: ui.mode === "online", connected: ui.peerStatus === "connected", isHost: ui.isHost,
       sheet(html, opts) { ui.sheet = Object.assign({ kind: "game", html }, opts || {}); render(); },
       closeSheet() { ui.sheet = null; render(); },
     };
+  }
+  function coverShown(s) {
+    return ui.mode === "local" && game.hidden && s && s.status === "playing" && !!s.game && !ui.sheet &&
+      !(game.result && game.result(s.game, { names: names(s) })) &&
+      (!game.needsCover || game.needsCover(s.game)) && ui.shownViewer !== game.viewer(s.game);
   }
   function tableHTML(s, ctx) {
     const log = s.game && Array.isArray(s.game.log);
@@ -370,7 +376,7 @@ window.Duo = function (game) {
   function layerHTML(s, ctx) {
     const sh = ui.sheet;
     let h = "";
-    const res = ctx && game.result ? game.result(s.game) : null;
+    const res = ctx && game.result ? game.result(s.game, ctx) : null;
     if (res && (!sh || sh.kind === "menu")) {
       const canAct = ui.mode === "local" || ctx.me >= 0;
       h += `<div class="duo-scrim center"><div class="duo-sheet duo-result" role="dialog" aria-modal="true" aria-label="게임 결과">
