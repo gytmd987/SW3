@@ -13,9 +13,11 @@
  *   changed(prev, g, ctx) (optional)          after a new state arrives (animations)
  *   result(g, ctx) -> {title, html} | null    game over summary
  *
- * Online play: the room creator's page is the authority. The guest sends its moves as
+ * Online play: there is one table per game. Whoever opens the game first holds the table
+ * (the "host"); the other page joins it automatically. The guest sends its moves as
  * actions; the host applies them and sends back the whole state. Both keep the state in
- * localStorage, so a reload on either side resumes the game.
+ * localStorage, so if the host leaves, the other page takes the table over and the game
+ * goes on.
  */
 (function () {
 "use strict";
@@ -39,7 +41,6 @@ function toast(msg) {
 }
 window.DuoUtil = { $, esc, clone, rnd, shuffle, store, josa, toast };
 
-const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const params = new URLSearchParams(location.search);
 
 window.Duo = function (game) {
@@ -51,7 +52,7 @@ window.Duo = function (game) {
     name: store.get("duo-name", "") || store.get("hanabi-name", ""),
     myId: (() => { let id = store.get("hanabi-id", null); if (!id) { id = "p" + Date.now().toString(36) + rnd(1e9).toString(36); store.set("hanabi-id", id); } return id; })(),
     net: window.RTCPeerConnection ? "peer" : null,
-    room: null, isHost: false, peer: null, conn: null, peerStatus: "idle", joinCode: "", guestId: null,
+    room: null, isHost: false, peer: null, conn: null, peerStatus: "idle", guestId: null,
     pending: [], aid: 0, lastAid: 0, lastRx: 0,
     online: null,
     sheet: null, armed: null, error: "",
@@ -68,7 +69,7 @@ window.Duo = function (game) {
   }
   function env(s) { return { players: s ? s.players : [], names: names(s) }; }
 
-  const saveState = () => { if (ui.room) store.set(K("room-" + ui.room), ui.online); };
+  const saveState = () => { if (ui.room) store.set(K("room-main"), ui.online); };
   function setState(next) {
     const prev = current();
     ui.online = next; saveState();
@@ -134,8 +135,12 @@ window.Duo = function (game) {
     setState(n);
   }
 
-  /* ───── room-code play over PeerJS ───── */
-  const PEER_PREFIX = "sw3-" + game.id + "-";
+  /* ───── one table per game over PeerJS ─────
+     모든 사람이 같은 이름(TABLE_ID)의 자리를 먼저 차지하려고 해 본다. 차지하면 방장, 이미
+     누가 있으면 그 사람에게 붙는다. 방장이 나가면 남은 쪽이 자리를 이어받는다. */
+  const TABLE_ID = "gytmd987-sw3-" + game.id + (params.get("table") ? "-" + params.get("table").replace(/[^a-z0-9]/gi, "") : "");
+  const ROOM = "main";
+  const RK = k => K("room-" + ROOM + (k ? "-" + k : ""));
   function peerOptions() {
     const o = { debug: 0, config: { iceServers: [
       { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] },
@@ -150,60 +155,66 @@ window.Duo = function (game) {
     const tryLoad = src => new Promise((res, rej) => { const sc = document.createElement("script"); sc.src = src; sc.onload = res; sc.onerror = rej; document.head.appendChild(sc); });
     return tryLoad("../vendor/peerjs.min.js").catch(() => tryLoad("https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"));
   }
-  const newCode = () => { let c = ""; for (let i = 0; i < 5; i++) c += CODE_CHARS[rnd(CODE_CHARS.length)]; return c; };
-  const shareLink = () => location.origin + location.pathname + "?r=" + ui.room;
   let retryTimer = null;
-  const retry = ms => { clearTimeout(retryTimer); retryTimer = setTimeout(() => { if (ui.room) startPeer(); }, ms); };
+  const retry = (ms, asHost) => { clearTimeout(retryTimer); retryTimer = setTimeout(() => { if (ui.room) startPeer(asHost); }, ms + rnd(700)); };
   function lobbyState() { return { v: 1, status: "lobby", players: [{ id: ui.myId, name: ui.name }], opts: Object.assign({}, ui.opts), seq: 1, game: null }; }
 
-  async function openRoom(code, host) {
-    ui.room = code; ui.isHost = host; ui.error = "";
-    store.set(K("room"), { code, host });
-    ui.online = store.get(K("room-" + code), null);
-    ui.pending = host ? [] : store.get(K("room-" + code + "-pend"), []);
-    ui.aid = store.get(K("room-" + code + "-aid"), 0);
-    ui.lastAid = host ? store.get(K("room-" + code + "-last"), 0) : 0;
-    ui.lastEp = host ? store.get(K("room-" + code + "-ep"), null) : null;
-    if (!host) { ui.ep = store.get(K("room-" + code + "-ep"), null); if (!ui.ep) { ui.ep = "e" + Date.now().toString(36) + rnd(1e6).toString(36); store.set(K("room-" + code + "-ep"), ui.ep); store.set(K("room-" + code + "-aid"), 0); ui.aid = 0; } }
-    if (host && !ui.online) { ui.online = lobbyState(); store.set(K("room-" + code), ui.online); }
+  async function join() {
+    ui.room = ROOM; ui.error = "";
+    ui.online = store.get(RK(), null);
     ui.peerStatus = "opening"; render();
     try { await loadPeerLib(); } catch (e) { ui.peerStatus = "error"; ui.error = "연결 모듈을 불러오지 못했어요. 인터넷 연결을 확인하고 새로고침해 주세요."; render(); return; }
-    startPeer();
+    startPeer(true);
   }
-  function leaveRoom() {
-    clearTimeout(retryTimer);
-    try { ui.conn && ui.conn.close(); } catch (e) {}
-    try { ui.peer && ui.peer.destroy(); } catch (e) {}
-    ui.peer = ui.conn = null; ui.room = null; ui.online = null; ui.peerStatus = "idle"; ui.joinCode = "";
-    store.set(K("room"), null);
-    if (params.get("r")) { params.delete("r"); const q = params.toString(); history.replaceState(null, "", location.pathname + (q ? "?" + q : "")); }
-    render();
+  function becomeHost() {
+    ui.isHost = true;
+    ui.pending = []; store.set(RK("pend"), []);                 // 내 행동은 이미 내 상태에 들어 있다
+    ui.lastAid = store.get(RK("last"), 0);
+    ui.lastEp = store.get(RK("lastep"), null);
+    let st = store.get(RK(), null) || ui.online;
+    if (!st) st = lobbyState();
+    if (st.status !== "playing") {                           // 대기 화면이면 자리를 나부터 다시 채운다
+      st = clone(st); st.players = [{ id: ui.myId, name: ui.name }]; st.seq += 1;
+    }
+    ui.online = st; saveState();
+    ui.peerStatus = "waiting"; render();
   }
-  function startPeer() {
+  function becomeGuest() {
+    ui.isHost = false;
+    ui.pending = store.get(RK("pend"), []);
+    ui.aid = store.get(RK("aid"), 0);
+    ui.ep = store.get(RK("myep"), null);
+    if (!ui.ep) { ui.ep = "e" + Date.now().toString(36) + rnd(1e6).toString(36); store.set(RK("myep"), ui.ep); store.set(RK("aid"), 0); ui.aid = 0; }
+  }
+  function startPeer(asHost) {
     if (!ui.room) return;
     try { ui.peer && ui.peer.destroy(); } catch (e) {}
     ui.conn = null;
-    const host = ui.isHost;
-    const peer = host ? new Peer(PEER_PREFIX + ui.room, peerOptions()) : new Peer(peerOptions());
+    const peer = asHost ? new Peer(TABLE_ID, peerOptions()) : new Peer(peerOptions());
     ui.peer = peer;
-    peer.on("open", () => { if (ui.peer !== peer) return; if (host) { ui.peerStatus = "waiting"; render(); } else connectToHost(); });
-    peer.on("connection", conn => { if (host && ui.peer === peer) attach(conn); });
+    peer.on("open", () => {
+      if (ui.peer !== peer) return;
+      if (asHost) becomeHost();
+      else { becomeGuest(); connectToHost(); }
+    });
+    peer.on("connection", conn => { if (ui.isHost && ui.peer === peer) attach(conn); });
     peer.on("disconnected", () => { if (ui.peer === peer && !peer.destroyed) { try { peer.reconnect(); } catch (e) {} } });
     peer.on("error", err => {
       if (ui.peer !== peer) return;
       const t = err && err.type;
-      if (t === "peer-unavailable") { ui.peerStatus = "nohost"; render(); retry(3000); }
-      else if (t === "unavailable-id") { ui.peerStatus = "opening"; render(); retry(4000); }
+      if (t === "unavailable-id") retry(200, false);           // 이미 누가 자리에 있다 → 그쪽에 붙기
+      else if (t === "peer-unavailable") { ui.peerStatus = "waiting"; render(); retry(800, true); }   // 자리가 비었다 → 내가 차지
       else if (t === "browser-incompatible") { ui.peerStatus = "error"; ui.error = "이 브라우저는 온라인 연결을 지원하지 않아요. 크롬이나 사파리로 열어 주세요."; render(); }
-      else { if (!ui.conn) { ui.peerStatus = "lost"; render(); retry(5000); } }
+      else if (!ui.conn) { ui.peerStatus = "lost"; render(); retry(3000, !ui.isHost ? false : true); }
     });
   }
   function connectToHost() {
     if (!ui.peer || ui.peer.destroyed) return;
     const peer = ui.peer;
-    const conn = peer.connect(PEER_PREFIX + ui.room, { reliable: true, serialization: "json" });
+    const conn = peer.connect(TABLE_ID, { reliable: true, serialization: "json" });
     attach(conn);
-    setTimeout(() => { if (!conn._opened && ui.peer === peer && !peer.destroyed && !ui.conn) { try { conn.close(); } catch (e) {} ui.peerStatus = "nohost"; render(); connectToHost(); } }, 12000);
+    // 상대 페이지가 갑자기 꺼졌으면 자리 이름이 한동안 남아 있다 → 잠시 뒤 내가 차지해 본다
+    setTimeout(() => { if (!conn._opened && ui.peer === peer && !peer.destroyed && !ui.conn) { try { conn.close(); } catch (e) {} ui.peerStatus = "waiting"; render(); startPeer(true); } }, 10000);
   }
   function attach(conn) {
     conn.on("open", () => {
@@ -218,7 +229,7 @@ window.Duo = function (game) {
     const gone = () => {
       if (ui.conn !== conn) return;
       ui.conn = null; ui.peerStatus = ui.isHost ? "waiting" : "lost"; render();
-      if (!ui.isHost) retry(1500);
+      if (!ui.isHost) retry(1200, false);                     // 다시 붙어 보고, 상대가 없으면 내가 자리를 잡는다
     };
     conn.on("close", gone); conn.on("error", gone);
     conn._gone = gone;
@@ -232,10 +243,10 @@ window.Duo = function (game) {
   const seqOf = () => (ui.online ? ui.online.seq : 0);
 
   /* 손님 쪽: 아직 방장이 확인하지 않은 행동 */
-  const pendKey = () => K("room-" + ui.room + "-pend");
+  const pendKey = () => RK("pend");
   function queue(item) {
-    ui.aid = (ui.aid || store.get(K("room-" + ui.room + "-aid"), 0)) + 1;
-    store.set(K("room-" + ui.room + "-aid"), ui.aid);
+    ui.aid = (ui.aid || store.get(RK("aid"), 0)) + 1;
+    store.set(RK("aid"), ui.aid);
     item.aid = ui.aid;
     ui.pending.push(item); store.set(pendKey(), ui.pending);
     sendItem(item);
@@ -251,7 +262,7 @@ window.Duo = function (game) {
   }
 
   /* 방장 쪽: 손님 행동을 어디까지 처리했는지 */
-  const lastKey = () => K("room-" + ui.room + "-last");
+  const lastKey = () => RK("last");
   function sendSync() { send({ t: "sync", state: ui.online, ack: ui.lastAid || 0 }); }
 
   function adopt(st) {
@@ -268,25 +279,26 @@ window.Duo = function (game) {
     if (!m || typeof m !== "object") return;
     if (ui.isHost) {
       if (m.t === "hello") {
-        if (m.state && typeof m.state.seq === "number" && (!ui.online || (ui.online.status === "lobby" && ui.online.seq <= 2 && m.state.seq > ui.online.seq))) {
-          ui.online = clone(m.state); saveState();          // 방장이 기록을 잃어버린 경우에만 손님 것을 받는다
+        // 상대가 그동안 자리를 잡고 게임을 이어 갔다면 그쪽 상태가 더 새것이다
+        if (m.state && typeof m.state.seq === "number" && m.state.status === "playing" && (!ui.online || m.state.seq > ui.online.seq)) {
+          ui.online = clone(m.state); saveState();
         }
-        const s = ui.online ? clone(ui.online) : lobbyState();
+        let s = ui.online ? clone(ui.online) : lobbyState();
         const name = String(m.name || "상대").slice(0, 12);
-        const i = s.players.findIndex(p => p.id === m.id);
-        if (i < 0) {
-          if (s.status !== "lobby" || s.players.length >= 2) { send({ t: "full" }); return; }
-          s.players.push({ id: String(m.id), name }); s.seq += 1;
-        } else if (s.status === "lobby" && s.players[i].name !== name) { s.players[i].name = name; s.seq += 1; }
         ui.guestId = String(m.id);
+        const i = s.players.findIndex(p => p.id === m.id);
+        if (s.status !== "playing") {
+          const want = [s.players.find(p => p.id === ui.myId) || { id: ui.myId, name: ui.name }, { id: String(m.id), name }];
+          if (JSON.stringify(want) !== JSON.stringify(s.players)) { s.players = want; s.seq += 1; }
+        } else if (i < 0) { send({ t: "full", seq: s.seq }); sendSync(); return; }
         const prev = ui.online; ui.online = s; saveState();
         sendSync(); afterChange(prev, s);
       } else if (m.t === "act" || m.t === "cmd") {
-        if (m.ep && m.ep !== ui.lastEp) { ui.lastEp = m.ep; ui.lastAid = 0; store.set(K("room-" + ui.room + "-ep"), m.ep); }
+        if (m.ep && m.ep !== ui.lastEp) { ui.lastEp = m.ep; ui.lastAid = 0; store.set(RK("lastep"), m.ep); }
         if (typeof m.aid !== "number" || m.aid <= (ui.lastAid || 0)) { sendSync(); return; }   // 이미 처리한 것
         ui.lastAid = m.aid; store.set(lastKey(), ui.lastAid);
         if (m.t === "act") hostApply(ui.online ? ui.online.players.findIndex(p => p.id === ui.guestId) : -1, m.action);
-        else if (m.cmd === "opts") sendSync();                 // 설정은 방장만
+        else if (m.cmd === "reset") { const n = clone(ui.online || lobbyState()); n.status = "lobby"; n.game = null; n.players = [{ id: ui.myId, name: ui.name }, { id: ui.guestId, name: String(m.arg || "상대").slice(0, 12) }]; n.seq += 1; setState(n); }
         else runCommand(m.cmd, m.arg);
       } else if (m.t === "ping") {
         if (m.seq !== seqOf()) sendSync();
@@ -335,16 +347,13 @@ window.Duo = function (game) {
     return `<div class="duo-opts">${game.options.map(o => `<label class="duo-fld" for="opt-${o.id}">${esc(o.label)}
       <select id="opt-${o.id}" data-duo-opt="${o.id}" ${editable ? "" : "disabled"}>${o.choices.map(c => `<option value="${esc(c.v)}" ${String(opts[o.id]) === String(c.v) ? "selected" : ""}>${esc(c.label)}</option>`).join("")}</select></label>`).join("")}</div>`;
   }
-  function roomEntryHTML() {
+  function nameHTML() {
     return `<div class="duo-lobby">${hero()}
       <div class="duo-panel">
-        <h2>방 만들고 코드로 들어오기</h2>
+        <h2>이름을 알려 주세요</h2>
         <label class="duo-fld" for="name-in">내 이름<input type="text" id="name-in" maxlength="12" placeholder="예: 지우" value="${esc(ui.name)}"></label>
-        ${ui.joinCode ? "" : `<div class="duo-row"><button class="duo-btn primary" data-duo="create"><b>방 만들기</b><span>코드와 링크가 나와요. 상대에게 보내 주세요</span></button></div>`}
-        <label class="duo-fld" for="code-in">${ui.joinCode ? "받은 방 코드" : "받은 코드가 있다면"}<input type="text" id="code-in" maxlength="6" autocapitalize="characters" placeholder="예: K7QX2" value="${esc(ui.joinCode)}" style="text-transform:uppercase;letter-spacing:.2em"></label>
-        <div class="duo-row"><button class="duo-btn ${ui.joinCode ? "primary" : ""}" data-duo="join"><b>이 코드로 들어가기</b><span>상대가 만든 방에 앉아요</span></button></div>
-        ${ui.error ? `<p class="duo-err">${esc(ui.error)}</p>` : ""}
-        <p class="duo-note">방을 만든 사람의 화면이 게임판 역할을 해요. 누가 페이지를 닫아도 다시 열면 이어서 할 수 있어요.</p>
+        <div class="duo-row"><button class="duo-btn primary" data-duo="name-save"><b>들어가기</b><span>상대도 이 게임을 열면 자동으로 같은 판에 앉아요</span></button></div>
+        <p class="duo-note">이름은 이 폰에 기억돼요. 다른 게임에서도 다시 묻지 않아요.</p>
       </div>
       <div class="duo-row">${rulesBtn}</div></div>`;
   }
@@ -352,28 +361,27 @@ window.Duo = function (game) {
     return `<div class="duo-lobby">${hero()}<div class="duo-panel"><h2>이 브라우저에서는 연결할 수 없어요</h2>
       <p class="duo-note">이 브라우저는 폰끼리 연결하는 기능(WebRTC)을 지원하지 않아요. 크롬이나 사파리 최신 버전으로 열어 주세요.</p></div></div>`;
   }
-  function roomLobbyHTML(s) {
+  function lobbyHTML(s) {
     const players = (s && s.players) || [];
-    const seats = [0, 1].map(i => { const p = players[i]; return `<div class="duo-seat ${p ? "filled" : ""}"><div class="tag">${i === 0 ? "방장" : "손님"}${p && p.id === ui.myId ? " · 나" : ""}</div><div class="who">${p ? esc(p.name) : "빈 자리"}</div></div>`; }).join("");
-    const ready = players.length === 2 && players.some(p => p.id === ui.myId);
+    const me = players.find(p => p.id === ui.myId), other = players.find(p => p.id !== ui.myId);
+    const linked = ui.peerStatus === "connected";
+    const seats = `<div class="duo-seat filled"><div class="tag">나</div><div class="who">${esc(ui.name)}</div></div>
+      <div class="duo-seat ${other && linked ? "filled" : ""}"><div class="tag">상대</div><div class="who">${other && linked ? esc(other.name) : "기다리는 중…"}</div></div>`;
     let action;
-    if (ui.peerStatus === "full") action = `<p class="duo-err">이 방은 이미 두 사람이 앉아 있어요. 코드를 다시 확인해 주세요.</p>`;
-    else if (ready) action = `<div class="duo-row"><button class="duo-btn primary" data-duo="start" ${ui.peerStatus === "connected" ? "" : "disabled"}><b>게임 시작</b><span>${ui.peerStatus === "connected" ? "둘 다 준비됐어요" : "상대와 다시 연결되면 시작할 수 있어요"}</span></button></div>`;
-    else if (ui.isHost) action = `<p class="duo-note">아래 링크나 코드를 상대에게 보내 주세요. 상대가 들어오면 자리에 이름이 떠요.</p>`;
-    else action = `<p class="duo-note">${ui.peerStatus === "nohost" ? "방을 찾고 있어요. 방을 만든 사람이 페이지를 열어 두었는지 확인해 주세요." : "방에 연결하는 중…"}</p>`;
+    if (ui.peerStatus === "full") action = `<p class="duo-note">상대 폰에서 다른 사람과 하던 판이 진행 중이에요.</p>
+      <div class="duo-row"><button class="duo-btn warn" data-duo="reset" data-key="reset"><b>${ui.armed === "reset" ? "정말 그 판을 끝낼까요? 한 번 더 누르기" : "그 판 끝내고 둘이 새로 하기"}</b><span>진행 중이던 판은 사라져요</span></button></div>`;
+    else if (me && other && linked) action = `<div class="duo-row"><button class="duo-btn primary" data-duo="start"><b>게임 시작</b><span>둘 다 준비됐어요</span></button></div>`;
+    else action = `<p class="duo-note">${linked ? "상대 정보를 받는 중…" : "상대도 이 게임을 열면 자동으로 연결돼요."}</p>`;
     return `<div class="duo-lobby">${hero()}
       <div class="duo-panel">
-        <div class="duo-head"><h2>방 코드</h2>${connPill()}</div>
-        <div class="duo-code">${esc(ui.room)}</div>
-        ${ui.isHost ? `<div class="duo-share"><input type="text" id="share-link" readonly value="${esc(shareLink())}" aria-label="초대 링크"><button class="duo-pill" data-duo="copy">링크 복사</button></div>` : ""}
+        <div class="duo-head"><h2>같이 할 사람</h2>${connPill()}</div>
         <div class="duo-seats">${seats}</div>
-        ${optsHTML((s && s.opts) || ui.opts, ui.isHost)}
-        ${!ui.isHost && game.options && game.options.length ? `<p class="duo-note">설정은 방장이 정해요.</p>` : ""}
+        ${optsHTML((s && s.opts) || ui.opts, true)}
         ${action}
         ${ui.error ? `<p class="duo-err">${esc(ui.error)}</p>` : ""}
       </div>
       <div class="duo-row">${rulesBtn}
-        <button class="duo-btn warn" data-duo="leave" data-key="leave"><b>${ui.armed === "leave" ? "정말 나갈까요? 한 번 더 누르기" : "방 나가기"}</b><span>다른 방을 만들거나 들어가요</span></button></div></div>`;
+        <button class="duo-btn" data-duo="rename"><b>이름 바꾸기</b><span>지금: ${esc(ui.name)}</span></button></div></div>`;
   }
   function ctxFor(s) {
     const me = mySeat(s);
@@ -392,7 +400,8 @@ window.Duo = function (game) {
     return `<div class="duo-bar"><a class="duo-pill" href="../" aria-label="게임 목록">←</a><span class="duo-title">${esc(game.title)}</span><span class="sp"></span>
         ${connPill()}${log ? `<button class="duo-pill" data-duo="log">기록</button>` : ""}<button class="duo-pill" data-duo="rules">규칙</button><button class="duo-pill" data-duo="menu" aria-label="메뉴">⋯</button></div>
       <main id="duo-game">${game.render(ctx)}</main>
-      ${ctx.me < 0 ? `<p class="duo-wait">두 자리가 모두 차 있어서 구경 중이에요.</p>` : ""}`;
+      ${ctx.me < 0 ? `<p class="duo-wait">상대 폰에서 다른 사람과 하던 판이라 구경만 하고 있어요.</p>
+        <div class="duo-row"><button class="duo-btn warn" data-duo="reset" data-key="reset"><b>${ui.armed === "reset" ? "정말 그 판을 끝낼까요? 한 번 더 누르기" : "그 판 끝내고 둘이 새로 하기"}</b><span>진행 중이던 판은 사라져요</span></button></div>` : ""}`;
   }
 
   let renderPending = false;
@@ -403,8 +412,8 @@ window.Duo = function (game) {
     const s = current();
     let html, ctx = null;
     if (!ui.net) html = noNetHTML();
-    else if (!ui.room) html = roomEntryHTML();
-    else if (!s || s.status !== "playing" || !s.game) html = roomLobbyHTML(s);
+    else if (!ui.name || !ui.room || ui.renaming) html = nameHTML();
+    else if (!s || s.status !== "playing" || !s.game) html = lobbyHTML(s);
     else { ctx = ctxFor(s); html = tableHTML(s, ctx); }
     app.innerHTML = html;
     $("#layer").innerHTML = layerHTML(s, ctx);
@@ -439,7 +448,6 @@ window.Duo = function (game) {
       return wrapSheet(`<h2>메뉴</h2><div class="duo-row" style="flex-direction:column">
         <button class="duo-btn warn" data-duo="again" data-key="again"><b>${k === "again" ? "정말 새로 시작할까요? 한 번 더 누르기" : "이 판 그만두고 새 게임"}</b><span>같은 두 사람으로 처음부터</span></button>
         <button class="duo-btn warn" data-duo="lobby" data-key="lobby"><b>${k === "lobby" ? "정말 나갈까요? 한 번 더 누르기" : "처음 화면으로"}</b><span>설정 화면으로 (상대도 함께 이동)</span></button>
-        ${ui.room ? `<button class="duo-btn warn" data-duo="leave" data-key="leave"><b>${k === "leave" ? "정말 나갈까요? 한 번 더 누르기" : "방 나가기"}</b><span>같은 코드로 다시 들어올 수 있어요</span></button>` : ""}
       </div>`, "메뉴");
     }
     return "";
@@ -467,22 +475,19 @@ window.Duo = function (game) {
       case "menu": ui.sheet = { kind: "menu" }; render(); break;
       case "close": ui.sheet = null; render(); break;
       case "peek": ui.sheet = { kind: "peek" }; render(); toast("다 봤으면 메뉴(⋯)에서 새 게임을 시작하세요"); break;
-      case "copy": {
-        const link = shareLink(), inp = $("#share-link");
-        const fb = () => { if (inp) { inp.focus(); inp.select(); } toast("링크를 길게 눌러 복사해 주세요"); };
-        try { navigator.clipboard.writeText(link).then(() => toast("링크를 복사했어요. 카톡으로 보내 주세요"), fb); } catch (err) { fb(); }
-        break;
-      }
-      case "create": case "join": {
+      case "name-save": {
         const nm = ($("#name-in").value || "").trim().slice(0, 12);
         if (!nm) { toast("이름을 먼저 적어 주세요"); $("#name-in").focus(); return; }
+        const changed = ui.room && nm !== ui.name;
+        ui.renaming = false;
         ui.name = nm; store.set("duo-name", nm);
-        if (cmd === "create") { openRoom(newCode(), true); break; }
-        const code = ($("#code-in").value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-        if (code.length < 4) { toast("방 코드를 확인해 주세요"); $("#code-in").focus(); return; }
-        openRoom(code, false); break;
+        if (!ui.room) join();
+        else { render(); if (changed && ui.conn) send({ t: "hello", id: ui.myId, name: ui.name, state: ui.online, seq: seqOf() }); }
+        if (changed && ui.isHost && ui.online && ui.online.status !== "playing") { const n = clone(ui.online); n.players = n.players.map(p => p.id === ui.myId ? { id: p.id, name: nm } : p); n.seq += 1; setState(n); }
+        break;
       }
-      case "leave": ui.sheet = null; leaveRoom(); break;
+      case "rename": ui.renaming = true; render(); break;
+      case "reset": command("reset", ui.name); break;
       case "start": command("start"); break;
       case "again": ui.sheet = null; command("again"); break;
       case "lobby": ui.sheet = null; command("lobby"); break;
@@ -496,25 +501,15 @@ window.Duo = function (game) {
     const raw = sel.value;
     const v = o && typeof o.def === "number" ? +raw : raw;
     ui.opts[id] = v; store.set(K("opts"), ui.opts);
-    if (ui.isHost && ui.online && ui.online.status === "lobby") runCommand("opts", { [id]: v });
+    if (ui.online && ui.online.status === "lobby") command("opts", { [id]: v });
   });
   document.addEventListener("keydown", e => {
     if (e.key === "Escape" && ui.sheet) { ui.sheet = null; render(); }
-    if (e.key === "Enter" && (e.target.id === "name-in" || e.target.id === "code-in")) {
-      const b = (e.target.id === "code-in" || ui.joinCode) ? $('[data-duo="join"]') : $('[data-duo="create"]');
-      if (b) b.click();
-    }
+    if (e.key === "Enter" && e.target.id === "name-in") { const b = $('[data-duo="name-save"]'); if (b) b.click(); }
   });
 
   /* ───── boot ───── */
-  const urlRoom = (params.get("r") || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
-  const saved = store.get(K("room"), null);
-  if (ui.net) {
-    if (urlRoom) {
-      if (saved && saved.code === urlRoom && ui.name) openRoom(saved.code, saved.host);
-      else ui.joinCode = urlRoom;
-    } else if (saved && ui.name) openRoom(saved.code, saved.host);
-  }
+  if (ui.net && ui.name) join();
   render();
   return { render, current, act };
 };
