@@ -10,13 +10,14 @@
 | 쿼리도 | `quoridor/` |
 | 우봉고 | `ubongo/` |
 | 바퀴벌레 포커 | `cockroach/` |
+| 화이트홀 미스터리 | `whitehall/` (규칙 엔진과 지도는 `engine.js`) |
 | 스플렌더 대결 | `splendor-duel/` (규칙 엔진은 `engine.js`) |
 
-- `shared/duo.js`, `shared/duo.css` — 게임들이 같이 쓰는 뼈대: 방 코드 온라인 연결(PeerJS), 로비, 규칙 창
+- `shared/duo.js`, `shared/duo.css` — 게임들이 같이 쓰는 뼈대: 자동 연결(PeerJS), 메시지 재전송·재동기화, 로비, 규칙 창
 - `vendor/peerjs.min.js` — PeerJS 1.5.5
 
 ## 플레이 방식
-- **각자 폰으로 (온라인)**: 한 명이 방을 만들고 코드·링크를 보내면 다른 한 명이 들어온다. 방을 만든 쪽 화면이 게임판 역할을 하고, 두 브라우저는 PeerJS(WebRTC)로 직접 연결된다. 새로고침해도 이어서 할 수 있다.
+- 게임마다 판이 하나다. 둘이 같은 게임 페이지를 열면 자동으로 연결된다(PeerJS/WebRTC). 먼저 연 쪽이 판을 잡고(방장), 방장이 나가면 남은 쪽이 이어받는다. 새로고침해도 이어서 할 수 있다.
 
 ## 배포
 `./deploy.sh` — 사이트 파일을 `gh-pages` 브랜치로 올린다.

@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>화이트홀 미스터리</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hahmlet:wght@500;700;800&family=Gowun+Dodum&family=IM+Fell+English+SC&display=swap">
+<link rel="stylesheet" href="../shared/duo.css">
+<style>
+/* Layout: a gaslit 1888 map of the streets around Whitehall fills the screen; the 15-step night track above it, the move controls below. */
+:root {
+  color-scheme: dark;
+  --bg: #121417;
+  --bg2: #1d2024;
+  --panel: rgba(240, 220, 170, .06);
+  --line: rgba(242, 181, 68, .22);
+  --fg: #efe6d2;
+  --muted: #a99d84;
+  --accent: #f2b544;
+  --accent-fg: #1b1408;
+  --danger: #e2574c;
+  --ok: #8fd18a;
+  --sheet: #1f2226;
+  --scrim: rgba(5, 6, 8, .65);
+  --f-display: "Hahmlet", "Nanum Myeongjo", serif;
+  --f-body: "Gowun Dodum", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --f-fell: "IM Fell English SC", Georgia, serif;
+  --paper: #2b261f;
+  --street: #b9a479;
+  --blood: #c0392b;
+  --clue: #f2c84b;
+  --p0: #f2c84b; --p1: #4f97e3; --p2: #e25b55;
+}
+body {
+  background-color: var(--bg);
+  background-image: radial-gradient(90% 60% at 50% 0%, rgba(242, 181, 68, .1), transparent 70%), radial-gradient(70% 50% at 50% 100%, rgba(120, 140, 160, .12), transparent 70%);
+  background-attachment: fixed;
+}
+.duo-title { color: var(--accent); font-size: 18px; }
+.mark-w { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.mark-w .lamp { width: 64px; height: 88px; }
+.mark-w .en { font-family: var(--f-fell); font-size: 15px; letter-spacing: .3em; color: var(--muted); }
+
+.wh-top { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+.wh-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
+.wh-row b { color: var(--fg); font-weight: 400; }
+.wh-row .role { margin-left: auto; font-size: 12px; padding: 2px 10px; border-radius: 999px; border: 1px solid var(--line); }
+.wh-row .role.jack { border-color: var(--blood); color: #ff9187; }
+.wh-bodies { display: inline-flex; gap: 3px; }
+.wh-bodies i { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--blood); }
+.wh-bodies i.on { background: var(--blood); }
+.wh-track { display: grid; grid-template-columns: repeat(15, minmax(0, 1fr)); gap: 3px; }
+.wh-track span { aspect-ratio: 1; border-radius: 4px; border: 1px solid var(--line); display: grid; place-items: center; font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.wh-track span.on { background: rgba(242, 181, 68, .22); border-color: var(--accent); color: var(--fg); }
+.wh-track span.coach { background: rgba(79, 151, 227, .3); }
+.wh-track span.alley { background: rgba(160, 120, 220, .3); }
+.wh-track span.boat { background: rgba(90, 180, 200, .3); }
+.wh-track span:last-child { border-color: rgba(226, 87, 76, .6); }
+
+.wh-mapbox { position: relative; border-radius: 14px; overflow: auto; border: 1px solid var(--line); background: var(--paper); -webkit-overflow-scrolling: touch; max-height: 72vh; }
+.wh-map { display: block; width: 100%; height: auto; touch-action: pan-x pan-y; }
+.wh-map.zoom { width: 175%; }
+.wh-zoom { position: absolute; right: 8px; top: 8px; z-index: 2; }
+.wh-zoomwrap { position: relative; }
+.wh-map text { font-family: var(--f-body); pointer-events: none; }
+.wh-map .loc circle.base { fill: #eadfc4; stroke: #6d5d3f; stroke-width: 1.5; }
+.wh-map .loc text { font-size: 11px; font-weight: 700; fill: #2a2318; text-anchor: middle; dominant-baseline: central; }
+.wh-map .loc.can { cursor: pointer; }
+.wh-map .loc.can circle.base { fill: #fff3c9; stroke: var(--accent); stroke-width: 3; }
+.wh-map .loc.target circle.ring { fill: none; stroke: #ffd36b; stroke-width: 3; stroke-dasharray: 3 3; }
+.wh-map .loc.found circle.base { fill: var(--blood); stroke: #ffb3a8; }
+.wh-map .loc.found text { fill: #fff; }
+.wh-map .loc.clue circle.base { fill: var(--clue); stroke: #fff; stroke-width: 2.5; }
+.wh-map .loc.empty circle.base { fill: #6d6556; }
+.wh-map .loc.empty text { fill: #d8cfbd; }
+.wh-map .loc.trail circle.base { stroke: #ff8c7f; stroke-width: 3; }
+.wh-map .cr rect { fill: #111; stroke: #6b6253; stroke-width: 1.5; }
+.wh-map .cr.start rect { stroke: var(--clue); stroke-width: 2.5; }
+.wh-map .cr.can { cursor: pointer; }
+.wh-map .cr.can rect { stroke: #fff; stroke-width: 3; fill: #2b2b2b; }
+.wh-map .cr.chosen rect { fill: var(--clue); }
+.wh-map .pawn { pointer-events: none; }
+.wh-map .pawn.sel circle { stroke: #fff; stroke-width: 3; }
+.wh-say { margin: 0; text-align: center; font-size: 14px; min-height: 1.5em; text-wrap: balance; }
+.wh-say em { font-style: normal; color: var(--accent); }
+.wh-say .bad { color: var(--danger); }
+.wh-ctrl { display: flex; flex-direction: column; gap: 8px; }
+.wh-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+.wh-btns .duo-btn { flex: 1 1 90px; padding: 9px 10px; }
+.wh-btns .duo-btn b { font-size: 15px; }
+.wh-btns .duo-btn[aria-pressed=true] { border-color: var(--accent); background: rgba(242, 181, 68, .16); }
+.wh-pieces { display: flex; gap: 6px; }
+.wh-pieces button { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 8px; border-radius: 10px; border: 1px solid var(--line); background: transparent; font-size: 13px; }
+.wh-pieces button i { width: 14px; height: 14px; border-radius: 50%; }
+.wh-pieces button[aria-pressed=true] { border-color: #fff; background: rgba(255,255,255,.08); }
+.wh-pieces button.done { opacity: .45; }
+.wh-targets { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.wh-targets span { text-align: center; padding: 6px 2px; border-radius: 10px; border: 1px dashed var(--line); font-size: 12px; color: var(--muted); }
+.wh-targets span b { display: block; font-size: 17px; color: var(--fg); font-weight: 700; }
+.wh-targets span.set { border-style: solid; border-color: #ffd36b; }
+.wh-targets span.found { border-color: var(--blood); background: rgba(192, 57, 43, .15); }
+.rule-key { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; align-items: center; font-size: 13.5px; }
+.rule-key svg { width: 28px; height: 28px; }
+</style>
+</head>
+<body>
+<div class="duo" id="app"></div>
+<div id="layer"></div>
+<script src="../shared/duo.js"></script>
+<script src="engine.js"></script>
+<script>
+(() => {
+"use strict";
+const { esc, rnd, toast } = DuoUtil;
+const E = window.WHE, MAP = E.MAP;
+const TRACK_ICON = { walk: "", coach: "마", alley: "골", boat: "배" };
+const PCOL = ["var(--p0)", "var(--p1)", "var(--p2)"];
+const QUAD_TINT = ["rgba(192,57,43,.10)", "rgba(79,151,227,.10)", "rgba(200,160,60,.10)", "rgba(150,110,200,.10)"];
+
+const LAMP = `<svg class="lamp" viewBox="0 0 64 88" aria-hidden="true"><defs><radialGradient id="glow"><stop offset="0" stop-color="#ffd36b" stop-opacity=".9"/><stop offset="1" stop-color="#ffd36b" stop-opacity="0"/></radialGradient></defs><circle cx="32" cy="26" r="26" fill="url(#glow)"/><path d="M22 14 H42 L38 36 H26Z" fill="#ffe7a3" stroke="#3a3328" stroke-width="2"/><path d="M20 12 H44 L32 4Z" fill="#3a3328"/><rect x="24" y="36" width="16" height="4" fill="#3a3328"/><rect x="30" y="40" width="4" height="44" fill="#3a3328"/><rect x="24" y="82" width="16" height="5" rx="1" fill="#3a3328"/></svg>`;
+const HAT = `<g><ellipse cx="0" cy="6" rx="15" ry="4.5" fill="#0d0d0d" stroke="#c0392b" stroke-width="1.5"/><rect x="-9" y="-12" width="18" height="18" rx="2" fill="#0d0d0d" stroke="#c0392b" stroke-width="1.5"/><rect x="-9" y="1" width="18" height="3.5" fill="#c0392b"/></g>`;
+
+/* ───── map drawing ───── */
+function mapSVG(g, v) {
+  // v: { jack: show secret info, canLoc: Set, canCross: Set, chosenCross: Set, targets: Set, selPiece, reveal }
+  const parts = [];
+  const qx = MAP.cx, ry = MAP.riverY;
+  parts.push(`<rect width="${MAP.W}" height="${MAP.H}" fill="#2b261f"/>`);
+  [[0, 0, qx, ry], [qx, 0, MAP.W - qx, ry], [0, ry, qx, MAP.H - ry], [qx, ry, MAP.W - qx, MAP.H - ry]].forEach((r, i) => parts.push(`<rect x="${r[0]}" y="${r[1]}" width="${r[2]}" height="${r[3]}" fill="${QUAD_TINT[i]}"/>`));
+  // the Thames
+  parts.push(`<path d="M0 ${ry - 24} C ${MAP.W * .3} ${ry - 34}, ${MAP.W * .6} ${ry - 12}, ${MAP.W} ${ry - 22} L ${MAP.W} ${ry + 22} C ${MAP.W * .65} ${ry + 30}, ${MAP.W * .35} ${ry + 12}, 0 ${ry + 24} Z" fill="#203a4b"/>`);
+  for (let i = 0; i < 6; i++) parts.push(`<path d="M${30 + i * 90} ${ry - 4 + (i % 2) * 8} q 10 -5 20 0 t 20 0" stroke="#3f6a85" stroke-width="1.4" fill="none"/>`);
+  parts.push(`<text x="${MAP.W - 14}" y="${ry + 4}" text-anchor="end" style="font-family:var(--f-fell);font-size:13px;letter-spacing:4px;fill:#6f97b0">THAMES</text>`);
+  parts.push(`<text x="${qx}" y="${ry - 32}" text-anchor="middle" style="font-family:var(--f-fell);font-size:12px;letter-spacing:5px;fill:#cdb27a;opacity:.75">WHITEHALL</text>`);
+  // streets
+  MAP.segs.forEach(s => { const A = MAP.cross[s.a], B = MAP.cross[s.b]; parts.push(`<line x1="${A.x}" y1="${A.y}" x2="${B.x}" y2="${B.y}" stroke="${s.bridge ? "#8c7a58" : "#b9a479"}" stroke-width="${s.bridge ? 9 : 6}" stroke-linecap="round" opacity=".85"/>`); });
+  // Jack's trail this round (Jack only)
+  if (v.jack && g.path && g.path.length > 1) {
+    const pts = g.path.map(id => MAP.byId[id]);
+    parts.push(`<polyline points="${pts.map(p => p.x + "," + p.y).join(" ")}" fill="none" stroke="#ff6b5f" stroke-width="2.5" stroke-dasharray="5 4" opacity=".85"/>`);
+  }
+  // crossings
+  MAP.cross.forEach(c => {
+    const can = v.canCross && v.canCross.has(c.id);
+    const cls = ["cr", MAP.starts.includes(c.id) ? "start" : "", can ? "can" : "", v.chosenCross && v.chosenCross.has(c.id) ? "chosen" : ""].join(" ");
+    parts.push(`<g class="${cls}" ${can ? `data-a="cross" data-id="${c.id}" role="button" aria-label="교차로"` : ""}><rect x="${c.x - 7}" y="${c.y - 7}" width="14" height="14" rx="2"/>${can ? `<rect x="${c.x - 16}" y="${c.y - 16}" width="32" height="32" fill="transparent" stroke="none"/>` : ""}</g>`);
+  });
+  // places
+  const trail = new Set(v.jack ? g.path : []);
+  MAP.locs.forEach(l => {
+    const can = v.canLoc && v.canLoc.has(l.id);
+    const cls = ["loc", can ? "can" : "", g.found.includes(l.id) ? "found" : "", g.clues.includes(l.id) ? "clue" : g.empty.includes(l.id) ? "empty" : "", trail.has(l.id) && !g.found.includes(l.id) ? "trail" : "", v.targets && v.targets.has(l.id) ? "target" : ""].join(" ");
+    parts.push(`<g class="${cls}" ${can ? `data-a="loc" data-id="${l.id}" role="button" aria-label="${l.id}번"` : ""}>${v.targets && v.targets.has(l.id) ? `<circle class="ring" cx="${l.x}" cy="${l.y}" r="18"/>` : ""}<circle class="base" cx="${l.x}" cy="${l.y}" r="13"/>${can ? `<circle cx="${l.x}" cy="${l.y}" r="20" fill="transparent"/>` : ""}<text x="${l.x}" y="${l.y + .5}">${l.id}</text></g>`);
+  });
+  // investigators
+  if (g.police) g.police.forEach((x, p) => {
+    const c = MAP.cross[x];
+    parts.push(`<g class="pawn ${v.selPiece === p ? "sel" : ""}" transform="translate(${c.x} ${c.y - 2})"><circle r="11" fill="${["#f2c84b", "#4f97e3", "#e25b55"][p]}" stroke="#111" stroke-width="2"/><circle r="4" cy="-3" fill="rgba(255,255,255,.55)"/></g>`);
+  });
+  // Jack (Jack's own screen, or revealed at the end)
+  if ((v.jack || v.reveal) && g.jpos) { const l = MAP.byId[g.jpos]; parts.push(`<g class="pawn" transform="translate(${l.x + 14} ${l.y - 16})">${HAT}</g>`); }
+  return `<svg class="wh-map ${v.zoom ? "zoom" : ""}" viewBox="0 0 ${MAP.W} ${MAP.H}" role="img" aria-label="화이트홀 지도">${parts.join("")}</svg>`;
+}
+
+/* ───── page ───── */
+const game = {
+  id: "whitehall",
+  title: "화이트홀 미스터리",
+  mark: `<div class="mark-w">${LAMP}<span class="en">WHITEHALL</span></div>`,
+  tagline: "1888년 런던의 밤. 한 사람은 몰래 움직이는 잭, 한 사람은 수사관 셋을 이끌어 단서를 쫓아요.",
+  setup(players, opts, env) {
+    const prev = env.prev;
+    const jack = prev && prev.jack != null ? 1 - prev.jack : rnd(2);   // 판마다 역할을 바꿔요
+    return E.setup(jack);
+  },
+  apply(g, seat, a, env) { return E.apply(g, seat, a, env.names); },
+  result(g, ctx) {
+    if (g.phase !== "over") return null;
+    const N = ctx.names, jackWon = g.winner === "jack";
+    const who = jackWon ? N[g.jack] : N[1 - g.jack];
+    return { title: `${esc(who)} 님 승리!`, html: `<p style="text-align:center;margin:0">${jackWon ? "잭이 런던의 밤 속으로 사라졌어요." : "런던이 잭을 잡았어요."}<br><span class="sub">${esc(g.why)}</span></p>
+      <p class="sub" style="text-align:center;margin:0">잭의 목표: ${g.targets ? g.targets.map(t => t + "번").join(", ") : "-"} · 마지막 위치 ${g.jpos || "-"}번</p>` };
+  },
+  render(ctx) {
+    const g = ctx.g, N = ctx.names, ui = ctx.ui;
+    const me = ctx.me, spect = me < 0, iAmJack = me === g.jack;
+    const over = g.phase === "over";
+    const view = { jack: iAmJack, reveal: over, zoom: !!ui.zoom };
+    let say = "", ctrl = "";
+
+    const roleTag = spect ? "" : iAmJack ? `<span class="role jack">나는 잭</span>` : `<span class="role">나는 수사관</span>`;
+    const top = `<div class="wh-top">
+      <div class="wh-row"><span>발견 <span class="wh-bodies">${[0, 1, 2, 3].map(i => `<i class="${i < g.found.length ? "on" : ""}"></i>`).join("")}</span></span>
+        <span>단서 <b>${g.clues.length}</b></span>
+        ${g.phase !== "setup" ? `<span>잭의 특수 이동 남음: 마차 <b>${g.tiles.coach}</b> · 골목 <b>${g.tiles.alley}</b> · 배 <b>${g.tiles.boat}</b></span>` : ""}${roleTag}</div>
+      <div class="wh-track" aria-label="이번 라운드 잭 이동 ${g.track.length}/${E.LIMIT}">${Array.from({ length: E.LIMIT }, (_, i) => { const t = g.track[i]; return `<span class="${t ? "on " + t : ""}">${t ? TRACK_ICON[t] || "" : i + 1}</span>`; }).join("")}</div></div>`;
+
+    /* ── setup ── */
+    if (g.phase === "setup") {
+      if (iAmJack && !g.ready.jack) {
+        ui.tg = ui.tg || [null, null, null, null];
+        view.canLoc = new Set(MAP.locs.filter(l => l.quad != null).map(l => l.id));
+        view.targets = new Set(ui.tg.filter(Boolean));
+        const all = ui.tg.every(Boolean);
+        say = all ? "네 곳을 다 골랐어요. 첫 희생자가 발견될 <em>시작 장소</em>를 고르세요." : "구역마다 한 곳씩, 모두 <em>네 곳</em>을 지도에서 눌러 고르세요. 상대는 몰라요.";
+        ctrl = `<div class="wh-targets">${ui.tg.map((t, q) => `<span class="${t ? "set" : ""}">${MAP.quadName[q]}<b>${t ? t + "번" : "—"}</b></span>`).join("")}</div>
+          ${all ? `<div class="wh-btns">${ui.tg.map(t => `<button class="duo-btn ${ui.start === t ? "primary" : ""}" data-a="start" data-id="${t}"><b>${t}번에서 시작</b></button>`).join("")}</div>
+            <div class="wh-btns"><button class="duo-btn primary center" data-a="confirm-targets" ${ui.start ? "" : "disabled"}><b>이대로 확정</b><span>${ui.start ? `${ui.start}번에서 첫 번째 희생자가 발견돼요` : "시작 장소를 골라 주세요"}</span></button></div>` : ""}`;
+      } else if (!iAmJack && !spect && !g.ready.police) {
+        ui.pl = ui.pl || [];
+        view.canCross = new Set(MAP.starts);
+        view.chosenCross = new Set(ui.pl);
+        say = `노란 테두리 교차로 중 <em>세 곳</em>을 눌러 수사관을 세우세요 (${ui.pl.length}/3).`;
+        ctrl = `<div class="wh-btns"><button class="duo-btn primary center" data-a="confirm-police" ${ui.pl.length === 3 ? "" : "disabled"}><b>수사관 배치 확정</b><span>노랑 → 파랑 → 빨강 순서로 놓여요</span></button></div>`;
+      } else {
+        say = spect ? "준비 중이에요" : iAmJack ? `${esc(N[1 - g.jack])} 님이 수사관을 배치하는 중…` : `${esc(N[g.jack])} 님(잭)이 목표를 정하는 중…`;
+      }
+    }
+    /* ── Jack's move ── */
+    else if (g.phase === "jack") {
+      if (iAmJack) {
+        const o = E.jackOptions(g);
+        const mode = ui.mode && o[ui.mode] && o[ui.mode].length ? ui.mode : "walk";
+        if (mode === "coach" && ui.via) view.canLoc = new Set(E.coachTo(g, ui.via));
+        else view.canLoc = new Set(o[mode]);
+        view.targets = new Set(g.left);
+        const left = E.LIMIT - g.track.length;
+        say = mode === "coach" ? (ui.via ? `마차: <em>${ui.via}번</em>을 지나 도착할 곳을 고르세요` : "마차: 먼저 지나갈 곳을 고르세요 (두 칸, 수사관도 지나쳐요)")
+          : mode === "alley" ? "골목: 같은 블록에 붙은 곳으로 빠져나가요" : mode === "boat" ? "배: 강가의 다른 선착장으로 건너가요"
+          : `다음 목표(점선 고리)까지 <em>${left}번</em> 안에 가야 해요. 갈 곳을 누르세요.`;
+        const anyMove = o.walk.length || o.coach.length || o.alley.length || o.boat.length;
+        ctrl = `<div class="wh-btns" role="group" aria-label="이동 방법">
+          <button class="duo-btn" data-a="mode" data-v="walk" aria-pressed="${mode === "walk"}" ${o.walk.length ? "" : "disabled"}><b>걷기</b><span>한 칸</span></button>
+          <button class="duo-btn" data-a="mode" data-v="coach" aria-pressed="${mode === "coach"}" ${o.coach.length ? "" : "disabled"}><b>마차 ${g.tiles.coach}</b><span>두 칸 · 2턴 씀</span></button>
+          <button class="duo-btn" data-a="mode" data-v="alley" aria-pressed="${mode === "alley"}" ${o.alley.length ? "" : "disabled"}><b>골목 ${g.tiles.alley}</b><span>블록 가로지르기</span></button>
+          <button class="duo-btn" data-a="mode" data-v="boat" aria-pressed="${mode === "boat"}" ${o.boat.length ? "" : "disabled"}><b>배 ${g.tiles.boat}</b><span>선착장끼리</span></button></div>
+          <div class="wh-targets">${g.targets.map(t => `<span class="${g.found.includes(t) ? "found" : "set"}">${MAP.quadName[MAP.byId[t].quad]}<b>${t}번</b>${g.found.includes(t) ? "발견됨" : "남음"}</span>`).join("")}</div>
+          ${anyMove ? "" : `<div class="wh-btns"><button class="duo-btn warn center" data-a="stuck"><b>갈 곳이 없어요</b><span>잭이 갇혀서 수사관이 이겨요</span></button></div>`}`;
+        ui.modeNow = mode;
+      } else say = spect ? "잭이 움직이는 중" : `${esc(N[g.jack])} 님(잭)이 어둠 속을 움직이는 중… (${g.track.length}/${E.LIMIT})`;
+    }
+    /* ── investigators move ── */
+    else if (g.phase === "pmove") {
+      if (!iAmJack && !spect) {
+        let p = ui.piece != null && !g.moved[ui.piece] ? ui.piece : g.moved.indexOf(false);
+        ui.piece = p;
+        view.selPiece = p;
+        view.canCross = new Set(E.policeReach(g, p));
+        say = `<em>${E.PN[p]}</em> 수사관을 움직일 교차로를 누르세요 (두 칸까지). 그대로 두려면 다른 수사관을 고르세요.`;
+        ctrl = `<div class="wh-pieces">${[0, 1, 2].map(i => `<button data-a="piece" data-p="${i}" aria-pressed="${p === i}" class="${g.moved[i] ? "done" : ""}" ${g.moved[i] ? "disabled" : ""}><i style="background:${PCOL[i]}"></i>${E.PN[i]}${g.moved[i] ? " ✓" : ""}</button>`).join("")}</div>
+          <div class="wh-btns"><button class="duo-btn primary center" data-a="pdone"><b>이동 끝 → 수색하기</b><span>안 움직인 수사관은 제자리에 있어요</span></button></div>`;
+      } else say = spect ? "수사관이 움직이는 중" : `${esc(N[1 - g.jack])} 님의 수사관들이 움직이는 중…`;
+    }
+    /* ── investigators act ── */
+    else if (g.phase === "pact") {
+      const p = E.curPiece(g);
+      if (!iAmJack && !spect && p >= 0) {
+        view.selPiece = p;
+        const near = E.nearLocs(g.police[p]);
+        const act = ui.act && ui.actFor === p ? ui.act : g.acted[p] === "search" ? "search" : null;
+        if (act === "search") view.canLoc = new Set(near.filter(l => !g.asked[p].includes(l)));
+        if (act === "arrest") view.canLoc = new Set(near);
+        const last = g.last && (g.last.type === "empty" || g.last.type === "miss") && g.last.p === p ? `${g.last.loc}번: ${g.last.type === "empty" ? "단서 없음" : "아무도 없음"}. ` : "";
+        say = act === "search" ? `${last}<em>${E.PN[p]}</em> 수사관: 단서를 물어볼 곳을 누르세요. 찾으면 이 수사관의 수색이 끝나요.`
+          : act === "arrest" ? `<em>${E.PN[p]}</em> 수사관: 잭이 있다고 생각하는 곳을 누르세요. 틀리면 이번 차례는 끝이에요.`
+          : `<em>${E.PN[p]}</em> 수사관의 차례예요. 수색할까요, 체포할까요?`;
+        ctrl = `<div class="wh-pieces">${[0, 1, 2].map(i => `<button disabled aria-pressed="${p === i}" class="${g.acted[i] === "done" ? "done" : ""}"><i style="background:${PCOL[i]}"></i>${E.PN[i]}${g.acted[i] === "done" ? " ✓" : ""}</button>`).join("")}</div>
+          <div class="wh-btns">
+            <button class="duo-btn" data-a="act" data-v="search" aria-pressed="${act === "search"}" ${g.acted[p] === null || g.acted[p] === "search" ? "" : "disabled"}><b>단서 찾기</b><span>붙어 있는 곳을 하나씩</span></button>
+            <button class="duo-btn" data-a="act" data-v="arrest" aria-pressed="${act === "arrest"}" ${g.acted[p] === null ? "" : "disabled"}><b>체포하기</b><span>한 곳만</span></button>
+            <button class="duo-btn" data-a="pass"><b>${g.acted[p] === "search" ? "그만 찾기" : "넘어가기"}</b><span>다음 수사관</span></button></div>`;
+      } else say = spect ? "수사관이 수색하는 중" : `${esc(N[1 - g.jack])} 님의 수사관들이 단서를 찾는 중…`;
+    } else if (over) say = "";
+
+    return `${top}
+      <div class="wh-zoomwrap"><button class="duo-pill wh-zoom" data-a="zoom">${ui.zoom ? "축소" : "확대"}</button>
+      <div class="wh-mapbox" id="wh-mapbox">${mapSVG(g, view)}</div></div>
+      <p class="wh-say">${say}</p>
+      <div class="wh-ctrl">${ctrl}</div>`;
+  },
+  mounted(root, ctx) {
+    const box = root.querySelector("#wh-mapbox"); if (!box) return;
+    const ui = ctx.ui;
+    if (ui.scroll) { box.scrollLeft = ui.scroll[0]; box.scrollTop = ui.scroll[1]; }
+    box.addEventListener("scroll", () => { ui.scroll = [box.scrollLeft, box.scrollTop]; }, { passive: true });
+  },
+  changed(prev, g, ctx) {
+    const me = ctx.me, iAmJack = me === g.jack;
+    if (g.found.length > prev.found.length && g.phase !== "over") ctx.toast(`${g.found.length}번째 희생자가 ${g.found[g.found.length - 1]}번에서 발견됐어요`);
+    else if (iAmJack && g.clues.length > prev.clues.length) ctx.toast(`수사관이 ${g.clues[g.clues.length - 1]}번에서 단서를 찾았어요!`);
+    else if (!iAmJack && g.last && g.last.type === "clue" && JSON.stringify(prev.last) !== JSON.stringify(g.last)) ctx.toast(`${g.last.loc}번에 단서가 있어요!`);
+    if (prev.phase !== g.phase) { ctx.ui.mode = null; ctx.ui.via = null; ctx.ui.act = null; }
+  },
+  onClick(el, ctx) {
+    const g = ctx.g, ui = ctx.ui, a = el.dataset.a, me = ctx.me;
+    if (a === "zoom") { ui.zoom = !ui.zoom; ctx.rerender(); return; }
+    if (g.phase === "setup") {
+      if (a === "loc") { const l = MAP.byId[+el.dataset.id]; ui.tg = ui.tg || [null, null, null, null]; ui.tg[l.quad] = l.id; if (!ui.tg.includes(ui.start)) ui.start = null; ctx.rerender(); }
+      else if (a === "start") { ui.start = +el.dataset.id; ctx.rerender(); }
+      else if (a === "confirm-targets") ctx.act({ type: "targets", locs: ui.tg, start: ui.start });
+      else if (a === "cross") { const id = +el.dataset.id; ui.pl = ui.pl || []; ui.pl = ui.pl.includes(id) ? ui.pl.filter(x => x !== id) : ui.pl.length < 3 ? ui.pl.concat(id) : ui.pl; ctx.rerender(); }
+      else if (a === "confirm-police") ctx.act({ type: "place", at: ui.pl });
+      return;
+    }
+    if (g.phase === "jack") {
+      if (a === "mode") { ui.mode = el.dataset.v; ui.via = null; ctx.rerender(); }
+      else if (a === "stuck") ctx.act({ type: "stuck" });
+      else if (a === "loc") {
+        const id = +el.dataset.id, mode = ui.modeNow || "walk";
+        if (mode === "coach" && !ui.via) { ui.via = id; ctx.rerender(); return; }
+        const act = mode === "coach" ? { type: "coach", via: ui.via, to: id } : { type: mode, to: id };
+        if (ctx.act(act)) { ui.mode = null; ui.via = null; }
+      }
+      return;
+    }
+    if (g.phase === "pmove") {
+      if (a === "piece") { ui.piece = +el.dataset.p; ctx.rerender(); }
+      else if (a === "cross") { const p = ui.piece; if (ctx.act({ type: "pmove", p, to: +el.dataset.id })) ui.piece = null; }
+      else if (a === "pdone") ctx.act({ type: "pdone" });
+      return;
+    }
+    if (g.phase === "pact") {
+      const p = E.curPiece(g);
+      if (a === "act") { ui.act = el.dataset.v; ui.actFor = p; ctx.rerender(); }
+      else if (a === "pass") { ui.act = null; ctx.act({ type: "pass", p }); }
+      else if (a === "loc") {
+        const act = ui.act && ui.actFor === p ? ui.act : g.acted[p] === "search" ? "search" : null;
+        if (act) ctx.act({ type: act, p, loc: +el.dataset.id });
+      }
+    }
+  },
+  rules: `
+  <p>1888년 런던. 한 사람은 <b>잭</b>이 되어 지도 위를 몰래 움직이고, 다른 사람은 <b>수사관 세 명</b>을 움직여 잭이 지나간 흔적을 쫓는 숨바꼭질 게임이에요. 판마다 역할이 바뀌어요.</p>
+  <h3>지도</h3>
+  <div class="rule-key">
+    <svg viewBox="0 0 28 28"><circle cx="14" cy="14" r="11" fill="#eadfc4" stroke="#6d5d3f" stroke-width="1.5"/><text x="14" y="15" font-size="10" text-anchor="middle" dominant-baseline="central" fill="#2a2318">12</text></svg><span><b>번호 동그라미</b>: 잭이 다니는 장소. 같은 교차로에서 만나는 장소끼리 한 칸이에요.</span>
+    <svg viewBox="0 0 28 28"><rect x="7" y="7" width="14" height="14" rx="2" fill="#111" stroke="#f2c84b" stroke-width="2.5"/></svg><span><b>검은 네모</b>: 수사관이 서는 교차로. 노란 테두리는 시작할 수 있는 곳.</span>
+  </div>
+  <p>템스강은 다리 두 곳으로만 걸어서 건널 수 있어요. 지도는 네 구역(북서·북동·남서·남동)으로 나뉘어요.</p>
+  <h3>준비</h3>
+  <ul><li><b>잭</b>은 구역마다 한 곳씩 <b>목표 장소 네 곳</b>을 몰래 정하고, 그중 한 곳을 시작 장소로 골라요. 그곳에서 첫 번째 희생자가 발견돼요(모두에게 공개).</li>
+  <li><b>수사관</b>은 노란 테두리 교차로 중 세 곳에 노랑·파랑·빨강 수사관을 세워요.</li></ul>
+  <h3>한 턴</h3>
+  <ol><li><b>잭이 움직여요.</b> 한 칸 걷기. 수사관이 서 있는 교차로는 지나갈 수 없어요. 대신 특수 이동을 한 번씩 쓸 수 있어요(각 2번씩).
+    <ul><li><b>마차</b>: 두 칸을 한 번에, 수사관도 지나쳐요. 이동 칸은 2칸 써요.</li><li><b>골목</b>: 같은 블록에 붙은 다른 장소로 블록을 가로질러요.</li><li><b>배</b>: 강가 선착장에서 다른 선착장으로 건너요.</li></ul>
+    수사관에게는 어디로 갔는지는 안 보이고, 몇 번째 이동인지와 특수 이동을 썼는지만 보여요.</li>
+  <li><b>수사관이 움직여요.</b> 각자 교차로를 따라 두 칸까지.</li>
+  <li><b>수사관이 수색하거나 체포해요.</b> 노랑 → 파랑 → 빨강 순서로, 각 수사관은 둘 중 하나만:
+    <ul><li><b>단서 찾기</b>: 자기 교차로에 붙은 장소를 하나씩 물어봐요. 잭이 <b>이번 라운드에 지나간 곳</b>이면 노란 단서가 놓이고 그 수사관의 수색은 끝나요. 아니면 계속 물어볼 수 있어요.</li>
+    <li><b>체포하기</b>: 붙은 장소 한 곳을 골라요. 잭이 지금 거기 있으면 수사관 승리!</li></ul></li></ol>
+  <h3>라운드와 승리</h3>
+  <ul><li>잭은 <b>15번 이동 안에</b> 남은 목표 장소 중 한 곳에 도착해야 해요. 도착하면 그곳에서 희생자가 발견되고, 단서가 모두 지워진 채 새 라운드가 시작돼요.</li>
+  <li><b>잭 승리</b>: 네 곳 모두에서 희생자가 발견되면.</li>
+  <li><b>수사관 승리</b>: 잭을 체포하거나, 잭이 15번 안에 목표에 못 닿거나, 잭이 더 이상 움직일 수 없게 되면.</li></ul>
+  <h3>이 앱에 대해</h3>
+  <ul><li>지도는 원작의 화이트홀 그림이 아니라 이 앱이 만든 런던 거리예요. 규칙은 원작을 따라요.</li>
+  <li>특수 이동 개수(종류별 2번)는 이 앱에서 정한 값이에요.</li>
+  <li>지도가 작으면 오른쪽 위 "확대"를 눌러 크게 보고 손가락으로 밀어 보세요.</li></ul>`,
+};
+Duo(game);
+})();
+</script>
+</body>
+</html>

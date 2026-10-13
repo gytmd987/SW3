@@ -10,7 +10,7 @@
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=Gowun+Dodum&family=Yuji+Syuku&family=Cinzel:wght@800&family=Lilita+One&family=Jua&family=Dokdo&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=Gowun+Dodum&family=Yuji+Syuku&family=Cinzel:wght@800&family=Lilita+One&family=Jua&family=Dokdo&family=IM+Fell+English+SC&display=swap">
 <style>
 /* Layout: a game shelf on a walnut table — each tile is a little box lid in that game's own colors. */
 :root {
@@ -91,6 +91,9 @@ const GAMES = [
   { href: "splendor-duel/", name: "스플렌더 대결", sub: "Splendor Duel", time: "30분", kind: "대결",
     desc: "보석 토큰을 모아 카드를 사고 왕관과 명성을 쌓아요. 둘만을 위한 스플렌더.",
     lid: `<svg viewBox="0 0 160 90"><rect width="160" height="90" fill="#16222e"/>${[["#f4f1ea", 34], ["#2f6fd6", 58], ["#2fa86b", 82], ["#d6413a", 106], ["#3a3a46", 130]].map(([c, x]) => `<g transform="translate(${x} 40)"><path d="M0 -14 L12 -4 L7 12 L-7 12 L-12 -4Z" fill="${c}" stroke="#d9b45a" stroke-width="1.2"/><path d="M0 -14 L4 -4 L0 12 L-4 -4Z" fill="#fff" opacity=".25"/></g>`).join("")}<path d="M66 72 L72 64 L80 70 L88 64 L94 72 Z" fill="#d9b45a"/></svg>` },
+  { href: "whitehall/", name: "화이트홀 미스터리", sub: "Whitehall Mystery", time: "40분", kind: "추리",
+    desc: "한 사람은 몰래 움직이는 잭, 한 사람은 수사관 셋. 단서를 모아 1888년 런던의 밤에서 잭을 잡아요.",
+    lid: `<svg viewBox="0 0 160 90"><rect width="160" height="90" fill="#2b261f"/><path d="M0 52 C 50 44, 100 62, 160 50 L160 66 C 100 76, 50 58, 0 68Z" fill="#203a4b"/><g stroke="#b9a479" stroke-width="3" stroke-linecap="round" opacity=".85"><path d="M10 14 H150 M10 34 H150 M10 80 H150 M30 6 V48 M80 6 V48 M130 6 V48 M50 70 V88 M110 70 V88 M60 40 V76"/></g><g fill="#eadfc4" stroke="#6d5d3f">${[[20, 14], [55, 14], [105, 34], [30, 26], [80, 24], [130, 22], [80, 80], [130, 80]].map(([x, y]) => `<circle cx="${x}" cy="${y}" r="4"/>`).join("")}</g><circle cx="55" cy="34" r="4.5" fill="#c0392b"/><circle cx="105" cy="14" r="4.5" fill="#f2c84b"/><g transform="translate(120 40)"><ellipse cx="0" cy="6" rx="11" ry="3.5" fill="#0d0d0d" stroke="#c0392b"/><rect x="-7" y="-8" width="14" height="14" rx="2" fill="#0d0d0d" stroke="#c0392b"/><rect x="-7" y="2" width="14" height="2.5" fill="#c0392b"/></g><text x="10" y="64" font-family="IM Fell English SC, serif" font-size="11" letter-spacing="3" fill="#cdb27a">WHITEHALL</text></svg>` },
   { href: "cockroach/", name: "바퀴벌레 포커", sub: "Kakerlakenpoker", time: "15분", kind: "블러핑",
     desc: "\"이건 쥐야.\" 카드를 건네며 거짓말을 해요. 같은 벌레 네 마리가 모이면 져요.",
     lid: `<svg viewBox="0 0 160 90"><rect width="160" height="90" fill="#1f2318"/><g opacity=".5">${Array.from({ length: 24 }, (_, i) => `<rect x="${(i % 8) * 20 + (Math.floor(i / 8) % 2) * 10}" y="${Math.floor(i / 8) * 30}" width="10" height="30" fill="#262b1d"/>`).join("")}</g><g transform="translate(58 14) scale(.95)"><g stroke="#2b1a0c" stroke-width="2.2" stroke-linecap="round" fill="none"><path d="M26 14 C18 4 10 6 6 2"/><path d="M38 14 C46 4 54 6 58 2"/><path d="M20 28 L8 22 M20 36 L6 38 M22 44 L10 54 M44 28 L56 22 M44 36 L58 38 M42 44 L54 54"/></g><ellipse cx="32" cy="38" rx="13" ry="20" fill="#8a5a2b"/><ellipse cx="32" cy="17" rx="7" ry="5" fill="#5a3415"/><circle cx="28.5" cy="16" r="1.4" fill="#fff"/><circle cx="35.5" cy="16" r="1.4" fill="#fff"/></g><text x="20" y="46" font-family="Dokdo, cursive" font-size="22" fill="#e8c547">진짜?</text><text x="112" y="70" font-family="Dokdo, cursive" font-size="22" fill="#ff6b5b">거짓!</text></svg>` },
