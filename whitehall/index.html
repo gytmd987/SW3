@@ -75,6 +75,30 @@ body {
 .wh-map .loc.clue circle.base { fill: var(--clue); stroke: #fff; stroke-width: 2.5; }
 .wh-map .loc.empty circle.base { fill: #6d6556; }
 .wh-map .loc.empty text { fill: #d8cfbd; }
+.wh-map .loc.found.clue circle.base { fill: var(--blood); stroke: #ffb3a8; }
+.wh-map .loc.found.clue text { fill: #fff; }
+.wh-map .loc.can.arrest circle.base { fill: #ffe3df; stroke: var(--danger); stroke-width: 3.5; }
+.wh-map.pulse .loc.can circle.base { animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 50% { stroke-width: 5; } }
+.wh-map .badge text { font-size: 10px; font-weight: 700; text-anchor: middle; dominant-baseline: central; }
+.wh-map .badge.clue circle { fill: var(--clue); stroke: #1b1408; stroke-width: 1.5; }
+.wh-map .badge.clue text { fill: #1b1408; }
+.wh-map .badge.empty circle { fill: #3a342b; stroke: #d8cfbd; stroke-width: 1.2; }
+.wh-map .badge.empty text { fill: #f0e8d6; }
+/* 폰에서 지도를 길게 눌러도 글자가 선택되거나 메뉴가 뜨지 않게 */
+.wh-mapbox, .wh-map, .wh-map * { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+.wh-seg { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.wh-seg button { border: none; background: transparent; padding: 10px 6px; font-size: 15px; font-weight: 700; display: flex; flex-direction: column; align-items: center; gap: 1px; }
+.wh-seg button small { font-size: 11.5px; font-weight: 400; color: var(--muted); }
+.wh-seg button[aria-checked=true] { background: rgba(242, 181, 68, .2); color: var(--accent); box-shadow: inset 0 0 0 2px var(--accent); }
+.wh-seg button.arrest[aria-checked=true] { background: rgba(226, 87, 76, .18); color: #ff8b80; box-shadow: inset 0 0 0 2px var(--danger); }
+.wh-seg button:disabled { opacity: .35; }
+.wh-results { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; font-size: 12.5px; }
+.wh-results .lbl { color: var(--muted); margin-right: 2px; }
+.wh-results .chip { padding: 2px 9px; border-radius: 999px; font-weight: 700; }
+.wh-results .chip.clue { background: var(--clue); color: #1b1408; }
+.wh-results .chip.empty { background: #3a342b; color: #e8dfcb; border: 1px solid #6d6556; }
+.wh-say .bad { color: #ff8b80; }
 .wh-map .loc.trail circle.base { stroke: #ff8c7f; stroke-width: 3; }
 .wh-map .cr rect { fill: #111; stroke: #6b6253; stroke-width: 1.5; }
 .wh-map .cr.start rect { stroke: var(--clue); stroke-width: 2.5; }
@@ -152,7 +176,9 @@ function mapSVG(g, v) {
   MAP.locs.forEach(l => {
     const can = v.canLoc && v.canLoc.has(l.id);
     const cls = ["loc", can ? "can" : "", g.found.includes(l.id) ? "found" : "", g.clues.includes(l.id) ? "clue" : g.empty.includes(l.id) ? "empty" : "", trail.has(l.id) && !g.found.includes(l.id) ? "trail" : "", v.targets && v.targets.has(l.id) ? "target" : ""].join(" ");
-    parts.push(`<g class="${cls}" ${can ? `data-a="loc" data-id="${l.id}" role="button" aria-label="${l.id}번"` : ""}>${v.targets && v.targets.has(l.id) ? `<circle class="ring" cx="${l.x}" cy="${l.y}" r="18"/>` : ""}<circle class="base" cx="${l.x}" cy="${l.y}" r="13"/>${can ? `<circle cx="${l.x}" cy="${l.y}" r="20" fill="transparent"/>` : ""}<text x="${l.x}" y="${l.y + .5}">${l.id}</text></g>`);
+    const badge = g.clues.includes(l.id) ? `<g class="badge clue"><circle cx="${l.x + 12}" cy="${l.y - 12}" r="8"/><text x="${l.x + 12}" y="${l.y - 11.5}">!</text></g>`
+      : g.empty.includes(l.id) ? `<g class="badge empty"><circle cx="${l.x + 12}" cy="${l.y - 12}" r="7.5"/><text x="${l.x + 12}" y="${l.y - 11.5}">✗</text></g>` : "";
+    parts.push(`<g class="${cls} ${can && v.arrest ? "arrest" : ""}" ${can ? `data-a="loc" data-id="${l.id}" role="button" aria-label="${l.id}번"` : ""}>${v.targets && v.targets.has(l.id) ? `<circle class="ring" cx="${l.x}" cy="${l.y}" r="18"/>` : ""}<circle class="base" cx="${l.x}" cy="${l.y}" r="13"/><text x="${l.x}" y="${l.y + .5}">${l.id}</text>${badge}${can ? `<circle cx="${l.x}" cy="${l.y}" r="22" fill="transparent"/>` : ""}</g>`);
   });
   // investigators
   if (g.police) g.police.forEach((x, p) => {
@@ -161,7 +187,13 @@ function mapSVG(g, v) {
   });
   // Jack (Jack's own screen, or revealed at the end)
   if ((v.jack || v.reveal) && g.jpos) { const l = MAP.byId[g.jpos]; parts.push(`<g class="pawn" transform="translate(${l.x + 14} ${l.y - 16})">${HAT}</g>`); }
-  return `<svg class="wh-map ${v.zoom ? "zoom" : ""}" viewBox="0 0 ${MAP.W} ${MAP.H}" role="img" aria-label="화이트홀 지도">${parts.join("")}</svg>`;
+  return `<svg class="wh-map ${v.zoom ? "zoom" : ""} ${v.pulse ? "pulse" : ""}" viewBox="0 0 ${MAP.W} ${MAP.H}" role="img" aria-label="화이트홀 지도">${parts.join("")}</svg>`;
+}
+
+// 수색 차례에는 기본이 "단서 찾기". 체포는 토글로 바꿨을 때만.
+function pactMode(g, ui, p) {
+  if (ui.actFor === p && ui.act === "arrest" && g.acted[p] === null) return "arrest";
+  return "search";
 }
 
 /* ───── page ───── */
@@ -257,24 +289,25 @@ const game = {
     else if (g.phase === "pact") {
       const p = E.curPiece(g);
       if (!iAmJack && !spect && p >= 0) {
-        view.selPiece = p;
+        view.selPiece = p; view.pulse = true;
         const near = E.nearLocs(g.police[p]);
-        const act = ui.act && ui.actFor === p ? ui.act : g.acted[p] === "search" ? "search" : null;
+        const act = pactMode(g, ui, p);
         if (act === "search") view.canLoc = new Set(near.filter(l => !g.asked[p].includes(l)));
-        if (act === "arrest") view.canLoc = new Set(near);
+        if (act === "arrest") { view.canLoc = new Set(near); view.arrest = true; }
         const last = g.last && (g.last.type === "empty" || g.last.type === "miss") && g.last.p === p ? `${g.last.loc}번: ${g.last.type === "empty" ? "단서 없음" : "아무도 없음"}. ` : "";
-        say = act === "search" ? `${last}<em>${E.PN[p]}</em> 수사관: 단서를 물어볼 곳을 누르세요. 찾으면 이 수사관의 수색이 끝나요.`
-          : act === "arrest" ? `<em>${E.PN[p]}</em> 수사관: 잭이 있다고 생각하는 곳을 누르세요. 틀리면 이번 차례는 끝이에요.`
-          : `<em>${E.PN[p]}</em> 수사관의 차례예요. 수색할까요, 체포할까요?`;
+        say = act === "search" ? `${last}<em>${E.PN[p]}</em> 수사관 주변의 <em>빛나는 번호</em>를 눌러 단서를 물어보세요. 단서를 찾으면 이 수사관은 끝나요.`
+          : `<em>${E.PN[p]}</em> 수사관: 잭이 있을 것 같은 <span class="bad">빨간 테두리 번호</span>를 누르세요. 틀리면 이번 차례는 끝이에요.`;
         ctrl = `<div class="wh-pieces">${[0, 1, 2].map(i => `<button disabled aria-pressed="${p === i}" class="${g.acted[i] === "done" ? "done" : ""}"><i style="background:${PCOL[i]}"></i>${E.PN[i]}${g.acted[i] === "done" ? " ✓" : ""}</button>`).join("")}</div>
-          <div class="wh-btns">
-            <button class="duo-btn" data-a="act" data-v="search" aria-pressed="${act === "search"}" ${g.acted[p] === null || g.acted[p] === "search" ? "" : "disabled"}><b>단서 찾기</b><span>붙어 있는 곳을 하나씩</span></button>
-            <button class="duo-btn" data-a="act" data-v="arrest" aria-pressed="${act === "arrest"}" ${g.acted[p] === null ? "" : "disabled"}><b>체포하기</b><span>한 곳만</span></button>
-            <button class="duo-btn" data-a="pass"><b>${g.acted[p] === "search" ? "그만 찾기" : "넘어가기"}</b><span>다음 수사관</span></button></div>`;
+          <div class="wh-seg" role="radiogroup" aria-label="할 일">
+            <button role="radio" data-a="act" data-v="search" aria-checked="${act === "search"}">단서 찾기<small>주변을 하나씩</small></button>
+            <button role="radio" class="arrest" data-a="act" data-v="arrest" aria-checked="${act === "arrest"}" ${g.acted[p] === null ? "" : "disabled"}>체포하기<small>${g.acted[p] === null ? "한 곳만" : "이미 수색했어요"}</small></button></div>
+          <div class="wh-btns"><button class="duo-btn" data-a="pass"><b>${g.acted[p] === "search" ? "그만 찾고 다음 수사관" : "이 수사관은 넘어가기"}</b><span>${p < 2 ? `다음: ${E.PN[p + 1]} 수사관` : "그다음은 잭 차례"}</span></button></div>`;
       } else say = spect ? "수사관이 수색하는 중" : `${esc(N[1 - g.jack])} 님의 수사관들이 단서를 찾는 중…`;
     } else if (over) say = "";
 
-    return `${top}
+    const results = g.phase !== "setup" && (g.clues.length || g.empty.length) ? `<div class="wh-results" aria-label="이번 라운드 수색 결과"><span class="lbl">이번 라운드 수색</span>
+      ${g.clues.map(l => `<span class="chip clue">${l}번 단서!</span>`).join("")}${g.empty.map(l => `<span class="chip empty">${l}번 ✗</span>`).join("")}</div>` : "";
+    return `${top}${results}
       <div class="wh-zoomwrap"><button class="duo-pill wh-zoom" data-a="zoom">${ui.zoom ? "축소" : "확대"}</button>
       <div class="wh-mapbox" id="wh-mapbox">${mapSVG(g, view)}</div></div>
       <p class="wh-say">${say}</p>
@@ -295,6 +328,7 @@ const game = {
   },
   onClick(el, ctx) {
     const g = ctx.g, ui = ctx.ui, a = el.dataset.a, me = ctx.me;
+    if (el.disabled) return;
     if (a === "zoom") { ui.zoom = !ui.zoom; ctx.rerender(); return; }
     if (g.phase === "setup") {
       if (a === "loc") { const l = MAP.byId[+el.dataset.id]; ui.tg = ui.tg || [null, null, null, null]; ui.tg[l.quad] = l.id; if (!ui.tg.includes(ui.start)) ui.start = null; ctx.rerender(); }
@@ -326,8 +360,8 @@ const game = {
       if (a === "act") { ui.act = el.dataset.v; ui.actFor = p; ctx.rerender(); }
       else if (a === "pass") { ui.act = null; ctx.act({ type: "pass", p }); }
       else if (a === "loc") {
-        const act = ui.act && ui.actFor === p ? ui.act : g.acted[p] === "search" ? "search" : null;
-        if (act) ctx.act({ type: act, p, loc: +el.dataset.id });
+        const act = pactMode(g, ui, p);
+        if (ctx.act({ type: act, p, loc: +el.dataset.id })) ui.act = null;
       }
     }
   },
