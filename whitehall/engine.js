@@ -34,7 +34,9 @@ const MAP = (() => {
     while (q.length) { const x = q.shift(); for (const y of adj.get(x) || []) if (!seen.has(y)) { seen.add(y); q.push(y); } }
     return seen.size === cross.length;
   };
-  const order = segs.map((s, i) => i).sort(() => R() - .5);
+  // 피셔-예이츠로 섞는다. (sort에 무작위 비교 함수를 쓰면 크롬과 사파리가 서로 다른 지도를 만든다)
+  const order = segs.map((s, i) => i);
+  for (let i = order.length - 1; i > 0; i--) { const j = Math.floor(R() * (i + 1)); [order[i], order[j]] = [order[j], order[i]]; }
   let removed = 0;
   for (const i of order) {
     if (removed >= 9) break;
@@ -64,7 +66,11 @@ const MAP = (() => {
   const crossAdj = {}; cross.forEach(c => { crossAdj[c.id] = []; });
   segs.forEach(s => { crossAdj[s.a].push(s.b); crossAdj[s.b].push(s.a); });
   const starts = [[1, 2], [1, 3], [2, 0], [2, 5], [4, 0], [4, 5], [5, 2], [5, 3]].map(([r, c]) => r * COLS + c);
-  return { W, H, cross, segs, locs, byId, locsAt, crossAdj, starts, riverY, cx, quadName: ["북서쪽", "북동쪽", "남서쪽", "남동쪽"] };
+  // 지도 지문: 두 폰이 같은 지도를 쓰는지 확인할 때 쓴다
+  const text = segs.map(x => x.a + "-" + x.b).join(",") + "|" + locs.map(l => l.cross.join("-")).join(",");
+  let h = 2166136261; for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 16777619); }
+  const sig = (h >>> 0).toString(36);
+  return { W, H, cross, segs, locs, byId, locsAt, crossAdj, starts, riverY, cx, sig, quadName: ["북서쪽", "북동쪽", "남서쪽", "남동쪽"] };
 })();
 
 /* ───── movement helpers ───── */
@@ -82,9 +88,10 @@ const boatFrom = loc => MAP.byId[loc].dock ? MAP.locs.filter(l => l.dock && l.id
 function coachVias(g) { return walkFrom(g.jpos, g.police, true); }
 function coachTo(g, via) { return walkFrom(via, g.police, true).filter(l => l !== g.jpos); }
 function policeReach(g, p) {
-  const from = g.police[p], seen = new Map([[from, 0]]), q = [from];
+  const from = g.pfrom ? g.pfrom[p] : g.police[p], seen = new Map([[from, 0]]), q = [from];
   while (q.length) { const x = q.shift(); const d = seen.get(x); if (d === 2) continue; for (const y of MAP.crossAdj[x]) if (!seen.has(y)) { seen.set(y, d + 1); q.push(y); } }
-  return [...seen.keys()].filter(x => x !== from && !g.police.includes(x));
+  const others = g.police.filter((_, i) => i !== p);
+  return [...seen.keys()].filter(x => x !== g.police[p] && !others.includes(x));   // 출발점으로 되돌아가기도 된다
 }
 const nearLocs = x => MAP.locsAt[x].slice();
 function jackOptions(g) {
@@ -103,7 +110,7 @@ const PN = ["노랑", "파랑", "빨강"];
 function setup(jack) {
   return {
     jack, phase: "setup", ready: { jack: false, police: false },
-    targets: null, police: null, jpos: null, path: [], track: [], round: 0, found: [], left: [],
+    mapSig: MAP.sig, targets: null, police: null, pfrom: null, jpos: null, path: [], track: [], round: 0, found: [], left: [],
     tiles: { coach: 2, alley: 2, boat: 2 },
     moved: [false, false, false], acted: [null, null, null], asked: [[], [], []], clues: [], empty: [],
     winner: null, why: "", log: [], last: null,
@@ -121,16 +128,15 @@ function afterJack(g, N) {
   } else if (g.track.length >= LIMIT) {
     g.phase = "over"; g.winner = "police"; g.why = `잭이 ${LIMIT}번 안에 다음 장소에 닿지 못했어요`; return g;
   }
-  g.phase = "pmove"; g.moved = [false, false, false];
+  g.phase = "pmove"; g.moved = [false, false, false]; g.pfrom = g.police.slice();
   return g;
 }
-function startPoliceActions(g) { g.phase = "pact"; g.acted = [null, null, null]; g.asked = [[], [], []]; return g; }
+function startPoliceActions(g) { g.phase = "pact"; g.acted = [null, null, null]; g.asked = [[], [], []]; g.pfrom = null; return g; }
 const curPiece = g => g.acted.findIndex(a => a !== "done");
-function finishPoliceIfDone(g) {
-  if (curPiece(g) < 0) {
-    g.phase = "jack";
-    if (!canJackMove(g)) { g.phase = "over"; g.winner = "police"; g.why = "잭이 갈 곳이 없어 갇혔어요"; }
-  }
+// 세 수사관이 다 끝나도 바로 넘기지 않는다. 수사관 쪽이 결과를 보고 "잭에게 넘기기"를 누른다.
+function endPolice(g) {
+  g.phase = "jack";
+  if (!canJackMove(g)) { g.phase = "over"; g.winner = "police"; g.why = "잭이 갈 곳이 없어 갇혔어요"; }
   return g;
 }
 
@@ -180,9 +186,8 @@ function apply(g, seat, a, N) {
   if (isJack) return null;
   if (g.phase === "pmove") {
     if (a.type === "pmove") {
-      if (!(a.p >= 0 && a.p < 3) || g.moved[a.p] || !policeReach(g, a.p).includes(a.to)) return null;
-      g.police[a.p] = a.to; g.moved[a.p] = true;
-      if (g.moved.every(Boolean)) startPoliceActions(g);
+      if (!(a.p >= 0 && a.p < 3) || !policeReach(g, a.p).includes(a.to)) return null;
+      g.police[a.p] = a.to; g.moved[a.p] = a.to !== g.pfrom[a.p];
       return g;
     }
     if (a.type === "pdone") return startPoliceActions(g);
@@ -190,6 +195,7 @@ function apply(g, seat, a, N) {
   }
   if (g.phase === "pact") {
     const p = curPiece(g);
+    if (a.type === "endpolice") { if (p >= 0) return null; return endPolice(g); }
     if (a.p !== p) return null;
     const near = nearLocs(g.police[p]);
     if (a.type === "search") {
@@ -205,16 +211,16 @@ function apply(g, seat, a, N) {
         g.last = { type: "empty", loc: a.loc, p };
         if (near.every(l => g.asked[p].includes(l))) g.acted[p] = "done";
       }
-      return finishPoliceIfDone(g);
+      return g;
     }
     if (a.type === "arrest") {
       if (g.acted[p] != null || !near.includes(a.loc)) return null;
       if (a.loc === g.jpos) { g.phase = "over"; g.winner = "police"; g.why = `${PN[p]} 수사관이 ${a.loc}번에서 잭을 체포했어요`; g.log.push(g.why); return g; }
       g.acted[p] = "done"; g.last = { type: "miss", loc: a.loc, p };
       g.log.push(`${PN[p]} 수사관이 ${a.loc}번을 덮쳤지만 아무도 없었어요`);
-      return finishPoliceIfDone(g);
+      return g;
     }
-    if (a.type === "pass") { g.acted[p] = "done"; return finishPoliceIfDone(g); }
+    if (a.type === "pass") { g.acted[p] = "done"; return g; }
   }
   return null;
 }

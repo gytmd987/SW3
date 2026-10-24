@@ -10,6 +10,9 @@ for f in index.html .nojekyll shared vendor hanabi lostcities 6nimmt quoridor ub
   [ -e "$f" ] && cp -R "$f" "$TMP/"
 done
 touch "$TMP/.nojekyll"
+# 폰에 예전 파일이 남지 않게 공용 파일 주소에 버전을 붙인다
+VER=$(git rev-parse --short HEAD)
+find "$TMP" -name index.html -exec sed -i "s/?v=dev/?v=$VER/g" {} +
 cd "$TMP"
 git add -A
 if git diff --cached --quiet; then echo "변경 없음"; else
