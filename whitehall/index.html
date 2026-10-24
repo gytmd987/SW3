@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hahmlet:wght@500;700;800&family=Gowun+Dodum&family=IM+Fell+English+SC&display=swap">
-<link rel="stylesheet" href="../shared/duo.css">
+<link rel="stylesheet" href="../shared/duo.css?v=0583c86">
 <style>
 /* Layout: a gaslit 1888 map of the streets around Whitehall fills the screen; the 15-step night track above it, the move controls below. */
 :root {
@@ -106,7 +106,12 @@ body {
 .wh-map .cr.can rect { stroke: #fff; stroke-width: 3; fill: #2b2b2b; }
 .wh-map .cr.chosen rect { fill: var(--clue); }
 .wh-map .pawn { pointer-events: none; }
+.wh-map .pawn.click { pointer-events: auto; cursor: pointer; }
+.wh-map .pawn .halo { fill: rgba(255,255,255,.18); stroke: #fff; stroke-width: 2; animation: halo 1.2s ease-in-out infinite; }
+@keyframes halo { 50% { r: 20; opacity: .6; } }
+.wh-map .cr .glow { fill: rgba(242, 200, 75, .25); stroke: var(--clue); stroke-width: 2.5; animation: halo 1.2s ease-in-out infinite; }
 .wh-map .pawn.sel circle { stroke: #fff; stroke-width: 3; }
+.wh-say b { color: var(--fg); }
 .wh-say { margin: 0; text-align: center; font-size: 14px; min-height: 1.5em; text-wrap: balance; }
 .wh-say em { font-style: normal; color: var(--accent); }
 .wh-say .bad { color: var(--danger); }
@@ -132,8 +137,8 @@ body {
 <body>
 <div class="duo" id="app"></div>
 <div id="layer"></div>
-<script src="../shared/duo.js"></script>
-<script src="engine.js"></script>
+<script src="../shared/duo.js?v=0583c86"></script>
+<script src="engine.js?v=0583c86"></script>
 <script>
 (() => {
 "use strict";
@@ -169,7 +174,7 @@ function mapSVG(g, v) {
   MAP.cross.forEach(c => {
     const can = v.canCross && v.canCross.has(c.id);
     const cls = ["cr", MAP.starts.includes(c.id) ? "start" : "", can ? "can" : "", v.chosenCross && v.chosenCross.has(c.id) ? "chosen" : ""].join(" ");
-    parts.push(`<g class="${cls}" ${can ? `data-a="cross" data-id="${c.id}" role="button" aria-label="교차로"` : ""}><rect x="${c.x - 7}" y="${c.y - 7}" width="14" height="14" rx="2"/>${can ? `<rect x="${c.x - 16}" y="${c.y - 16}" width="32" height="32" fill="transparent" stroke="none"/>` : ""}</g>`);
+    parts.push(`<g class="${cls}" ${can ? `data-a="cross" data-id="${c.id}" role="button" aria-label="교차로"` : ""}>${can ? `<circle class="glow" cx="${c.x}" cy="${c.y}" r="15"/>` : ""}<rect x="${c.x - 7}" y="${c.y - 7}" width="14" height="14" rx="2"/>${can ? `<circle cx="${c.x}" cy="${c.y}" r="24" fill="transparent"/>` : ""}</g>`);
   });
   // places
   const trail = new Set(v.jack ? g.path : []);
@@ -181,9 +186,11 @@ function mapSVG(g, v) {
     parts.push(`<g class="${cls} ${can && v.arrest ? "arrest" : ""}" ${can ? `data-a="loc" data-id="${l.id}" role="button" aria-label="${l.id}번"` : ""}>${v.targets && v.targets.has(l.id) ? `<circle class="ring" cx="${l.x}" cy="${l.y}" r="18"/>` : ""}<circle class="base" cx="${l.x}" cy="${l.y}" r="13"/><text x="${l.x}" y="${l.y + .5}">${l.id}</text>${badge}${can ? `<circle cx="${l.x}" cy="${l.y}" r="22" fill="transparent"/>` : ""}</g>`);
   });
   // investigators
+  const PC = ["#f2c84b", "#4f97e3", "#e25b55"];
+  if (v.ghosts && g.pfrom) g.pfrom.forEach((x, p) => { if (g.police[p] !== x) { const c = MAP.cross[x]; parts.push(`<circle cx="${c.x}" cy="${c.y - 2}" r="10" fill="none" stroke="${PC[p]}" stroke-width="2" stroke-dasharray="3 3" opacity=".8"/>`); } });
   if (g.police) g.police.forEach((x, p) => {
     const c = MAP.cross[x];
-    parts.push(`<g class="pawn ${v.selPiece === p ? "sel" : ""}" transform="translate(${c.x} ${c.y - 2})"><circle r="11" fill="${["#f2c84b", "#4f97e3", "#e25b55"][p]}" stroke="#111" stroke-width="2"/><circle r="4" cy="-3" fill="rgba(255,255,255,.55)"/></g>`);
+    parts.push(`<g class="pawn ${v.selPiece === p ? "sel" : ""} ${v.pawnClick ? "click" : ""}" ${v.pawnClick ? `data-a="piece" data-p="${p}" role="button" aria-label="${E.PN[p]} 수사관"` : ""} transform="translate(${c.x} ${c.y - 2})">${v.selPiece === p ? `<circle class="halo" r="17"/>` : ""}<circle r="11" fill="${PC[p]}" stroke="#111" stroke-width="2"/><circle r="4" cy="-3" fill="rgba(255,255,255,.55)"/>${v.pawnClick ? `<circle r="20" fill="transparent"/>` : ""}</g>`);
   });
   // Jack (Jack's own screen, or revealed at the end)
   if ((v.jack || v.reveal) && g.jpos) { const l = MAP.byId[g.jpos]; parts.push(`<g class="pawn" transform="translate(${l.x + 14} ${l.y - 16})">${HAT}</g>`); }
@@ -219,8 +226,14 @@ const game = {
     const g = ctx.g, N = ctx.names, ui = ctx.ui;
     const me = ctx.me, spect = me < 0, iAmJack = me === g.jack;
     const over = g.phase === "over";
+    if (g.mapSig !== MAP.sig) {        // 예전 버전으로 시작한 판(지도 지문 없음)도 여기로
+      return `<div class="duo-panel"><h2>두 폰의 지도가 달라요</h2><p class="duo-note">한쪽 폰에 예전 버전이 남아 있어요. 두 폰 모두 새로고침한 뒤, 메뉴(⋯)에서 "이 판 그만두고 새 게임"을 눌러 주세요.</p>
+        <div class="duo-row"><button class="duo-btn primary" data-a="reload"><b>새로고침</b><span>최신 버전 받기</span></button></div></div>`;
+    }
+    if (ui.zoom == null) ui.zoom = window.innerWidth < 600;   // 폰에서는 처음부터 크게
     const view = { jack: iAmJack, reveal: over, zoom: !!ui.zoom };
     let say = "", ctrl = "";
+    ui.focus = null;
 
     const roleTag = spect ? "" : iAmJack ? `<span class="role jack">나는 잭</span>` : `<span class="role">나는 수사관</span>`;
     const top = `<div class="wh-top">
@@ -271,18 +284,20 @@ const game = {
           <div class="wh-targets">${g.targets.map(t => `<span class="${g.found.includes(t) ? "found" : "set"}">${MAP.quadName[MAP.byId[t].quad]}<b>${t}번</b>${g.found.includes(t) ? "발견됨" : "남음"}</span>`).join("")}</div>
           ${anyMove ? "" : `<div class="wh-btns"><button class="duo-btn warn center" data-a="stuck"><b>갈 곳이 없어요</b><span>잭이 갇혀서 수사관이 이겨요</span></button></div>`}`;
         ui.modeNow = mode;
+        ui.focus = { key: "j" + g.jpos + ":" + g.track.length, loc: g.jpos };
       } else say = spect ? "잭이 움직이는 중" : `${esc(N[g.jack])} 님(잭)이 어둠 속을 움직이는 중… (${g.track.length}/${E.LIMIT})`;
     }
     /* ── investigators move ── */
     else if (g.phase === "pmove") {
       if (!iAmJack && !spect) {
-        let p = ui.piece != null && !g.moved[ui.piece] ? ui.piece : g.moved.indexOf(false);
+        const p = ui.piece != null ? ui.piece : Math.max(0, g.moved.indexOf(false));
         ui.piece = p;
-        view.selPiece = p;
+        view.selPiece = p; view.pawnClick = true; view.ghosts = true;
         view.canCross = new Set(E.policeReach(g, p));
-        say = `<em>${E.PN[p]}</em> 수사관을 움직일 교차로를 누르세요 (두 칸까지). 그대로 두려면 다른 수사관을 고르세요.`;
-        ctrl = `<div class="wh-pieces">${[0, 1, 2].map(i => `<button data-a="piece" data-p="${i}" aria-pressed="${p === i}" class="${g.moved[i] ? "done" : ""}" ${g.moved[i] ? "disabled" : ""}><i style="background:${PCOL[i]}"></i>${E.PN[i]}${g.moved[i] ? " ✓" : ""}</button>`).join("")}</div>
-          <div class="wh-btns"><button class="duo-btn primary center" data-a="pdone"><b>이동 끝 → 수색하기</b><span>안 움직인 수사관은 제자리에 있어요</span></button></div>`;
+        ui.focus = { key: "m" + p, cross: g.police[p] };
+        say = `<em>${E.PN[p]}</em> 수사관: <em>빛나는 교차로</em>를 누르면 그리로 가요 (두 칸까지). 다른 수사관은 지도에서 말을 누르거나 아래에서 고르세요. 이동 끝내기 전에는 다시 옮길 수 있어요.`;
+        ctrl = `<div class="wh-pieces">${[0, 1, 2].map(i => `<button data-a="piece" data-p="${i}" aria-pressed="${p === i}"><i style="background:${PCOL[i]}"></i>${E.PN[i]}${g.moved[i] ? " · 옮김" : ""}</button>`).join("")}</div>
+          <div class="wh-btns"><button class="duo-btn primary center" data-a="pdone"><b>이동 끝 → 수색하기</b><span>안 옮긴 수사관은 제자리에 있어요</span></button></div>`;
       } else say = spect ? "수사관이 움직이는 중" : `${esc(N[1 - g.jack])} 님의 수사관들이 움직이는 중…`;
     }
     /* ── investigators act ── */
@@ -294,7 +309,10 @@ const game = {
         const act = pactMode(g, ui, p);
         if (act === "search") view.canLoc = new Set(near.filter(l => !g.asked[p].includes(l)));
         if (act === "arrest") { view.canLoc = new Set(near); view.arrest = true; }
-        const last = g.last && (g.last.type === "empty" || g.last.type === "miss") && g.last.p === p ? `${g.last.loc}번: ${g.last.type === "empty" ? "단서 없음" : "아무도 없음"}. ` : "";
+        const L = g.last;
+        const last = !L || L.p == null ? "" : L.p === p ? `<b>${L.loc}번: ${L.type === "empty" ? "단서 없음 ✗" : L.type === "miss" ? "아무도 없음" : "단서!"}</b> `
+          : L.type === "clue" ? `<b>${E.PN[L.p]}: ${L.loc}번에서 단서 발견!</b> ` : L.type === "miss" ? `<b>${E.PN[L.p]}: ${L.loc}번 체포 실패.</b> ` : "";
+        ui.focus = { key: "a" + p, cross: g.police[p] };
         say = act === "search" ? `${last}<em>${E.PN[p]}</em> 수사관 주변의 <em>빛나는 번호</em>를 눌러 단서를 물어보세요. 단서를 찾으면 이 수사관은 끝나요.`
           : `<em>${E.PN[p]}</em> 수사관: 잭이 있을 것 같은 <span class="bad">빨간 테두리 번호</span>를 누르세요. 틀리면 이번 차례는 끝이에요.`;
         ctrl = `<div class="wh-pieces">${[0, 1, 2].map(i => `<button disabled aria-pressed="${p === i}" class="${g.acted[i] === "done" ? "done" : ""}"><i style="background:${PCOL[i]}"></i>${E.PN[i]}${g.acted[i] === "done" ? " ✓" : ""}</button>`).join("")}</div>
@@ -302,6 +320,10 @@ const game = {
             <button role="radio" data-a="act" data-v="search" aria-checked="${act === "search"}">단서 찾기<small>주변을 하나씩</small></button>
             <button role="radio" class="arrest" data-a="act" data-v="arrest" aria-checked="${act === "arrest"}" ${g.acted[p] === null ? "" : "disabled"}>체포하기<small>${g.acted[p] === null ? "한 곳만" : "이미 수색했어요"}</small></button></div>
           <div class="wh-btns"><button class="duo-btn" data-a="pass"><b>${g.acted[p] === "search" ? "그만 찾고 다음 수사관" : "이 수사관은 넘어가기"}</b><span>${p < 2 ? `다음: ${E.PN[p + 1]} 수사관` : "그다음은 잭 차례"}</span></button></div>`;
+      } else if (!iAmJack && !spect && p < 0) {
+        const L = g.last;
+        say = `${L && L.type === "clue" ? `<b>${E.PN[L.p]}: ${L.loc}번에서 단서 발견!</b> ` : L && L.type === "empty" ? `<b>${L.loc}번: 단서 없음 ✗</b> ` : ""}세 수사관 모두 끝났어요. 결과를 확인하고 잭에게 넘기세요.`;
+        ctrl = `<div class="wh-btns"><button class="duo-btn primary center" data-a="endpolice"><b>잭에게 넘기기</b><span>이번 라운드 수색 결과는 위에 계속 남아 있어요</span></button></div>`;
       } else say = spect ? "수사관이 수색하는 중" : `${esc(N[1 - g.jack])} 님의 수사관들이 단서를 찾는 중…`;
     } else if (over) say = "";
 
@@ -317,6 +339,15 @@ const game = {
     const box = root.querySelector("#wh-mapbox"); if (!box) return;
     const ui = ctx.ui;
     if (ui.scroll) { box.scrollLeft = ui.scroll[0]; box.scrollTop = ui.scroll[1]; }
+    const f = ui.focus;
+    if (ui.zoom && f && f.key !== ui.focusKey) {
+      ui.focusKey = f.key;
+      const pt = f.loc ? MAP.byId[f.loc] : MAP.cross[f.cross];
+      const svg = box.querySelector("svg"), k = svg.clientWidth / MAP.W;
+      box.scrollLeft = Math.max(0, pt.x * k - box.clientWidth / 2);
+      box.scrollTop = Math.max(0, pt.y * k - box.clientHeight / 2);
+      ui.scroll = [box.scrollLeft, box.scrollTop];
+    }
     box.addEventListener("scroll", () => { ui.scroll = [box.scrollLeft, box.scrollTop]; }, { passive: true });
   },
   changed(prev, g, ctx) {
@@ -324,12 +355,13 @@ const game = {
     if (g.found.length > prev.found.length && g.phase !== "over") ctx.toast(`${g.found.length}번째 희생자가 ${g.found[g.found.length - 1]}번에서 발견됐어요`);
     else if (iAmJack && g.clues.length > prev.clues.length) ctx.toast(`수사관이 ${g.clues[g.clues.length - 1]}번에서 단서를 찾았어요!`);
     else if (!iAmJack && g.last && g.last.type === "clue" && JSON.stringify(prev.last) !== JSON.stringify(g.last)) ctx.toast(`${g.last.loc}번에 단서가 있어요!`);
-    if (prev.phase !== g.phase) { ctx.ui.mode = null; ctx.ui.via = null; ctx.ui.act = null; }
+    if (prev.phase !== g.phase) { ctx.ui.mode = null; ctx.ui.via = null; ctx.ui.act = null; ctx.ui.piece = null; }
   },
   onClick(el, ctx) {
     const g = ctx.g, ui = ctx.ui, a = el.dataset.a, me = ctx.me;
     if (el.disabled) return;
-    if (a === "zoom") { ui.zoom = !ui.zoom; ctx.rerender(); return; }
+    if (a === "zoom") { ui.zoom = !ui.zoom; ui.focusKey = null; ctx.rerender(); return; }
+    if (a === "reload") { location.reload(); return; }
     if (g.phase === "setup") {
       if (a === "loc") { const l = MAP.byId[+el.dataset.id]; ui.tg = ui.tg || [null, null, null, null]; ui.tg[l.quad] = l.id; if (!ui.tg.includes(ui.start)) ui.start = null; ctx.rerender(); }
       else if (a === "start") { ui.start = +el.dataset.id; ctx.rerender(); }
@@ -351,7 +383,14 @@ const game = {
     }
     if (g.phase === "pmove") {
       if (a === "piece") { ui.piece = +el.dataset.p; ctx.rerender(); }
-      else if (a === "cross") { const p = ui.piece; if (ctx.act({ type: "pmove", p, to: +el.dataset.id })) ui.piece = null; }
+      else if (a === "cross") {
+        const p = ui.piece;
+        if (ctx.act({ type: "pmove", p, to: +el.dataset.id })) {
+          const nextFree = [0, 1, 2].find(i => i !== p && !ctx.g.moved[i] && i > p);   // 다음 안 옮긴 수사관으로
+          ui.piece = nextFree != null ? nextFree : p;
+          ctx.rerender();
+        }
+      }
       else if (a === "pdone") ctx.act({ type: "pdone" });
       return;
     }
@@ -359,6 +398,7 @@ const game = {
       const p = E.curPiece(g);
       if (a === "act") { ui.act = el.dataset.v; ui.actFor = p; ctx.rerender(); }
       else if (a === "pass") { ui.act = null; ctx.act({ type: "pass", p }); }
+      else if (a === "endpolice") ctx.act({ type: "endpolice" });
       else if (a === "loc") {
         const act = pactMode(g, ui, p);
         if (ctx.act({ type: act, p, loc: +el.dataset.id })) ui.act = null;
