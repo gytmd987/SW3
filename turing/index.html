@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>튜링 머신</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;600;700&family=IBM+Plex+Mono:wght@500;700&display=swap">
+<link rel="stylesheet" href="../shared/duo.css">
+<style>
+/* Layout: a steel machine console — the punch-card code composer at the top, the verifier cards in a grid below it, notes and the test log underneath. */
+:root {
+  color-scheme: dark;
+  --bg: #182126;
+  --bg2: #22303a;
+  --panel: rgba(220, 230, 235, .05);
+  --line: rgba(200, 215, 225, .16);
+  --fg: #e8edf0;
+  --muted: #93a4ae;
+  --accent: #e9a23b;
+  --accent-fg: #1a1205;
+  --danger: #e5604f;
+  --ok: #5cc98a;
+  --sheet: #1f2b32;
+  --scrim: rgba(6, 10, 12, .65);
+  --f-display: "IBM Plex Sans KR", "Apple SD Gothic Neo", sans-serif;
+  --f-body: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --card: #f3ebd7;
+  --ink: #2a2a24;
+  --B: #3b82c4; --Y: #e2b42c; --P: #8e5bb5;
+}
+body {
+  background-color: var(--bg);
+  background-image: linear-gradient(rgba(255,255,255,.025) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.025) 1px, transparent 1px);
+  background-size: 22px 22px;
+  background-attachment: fixed;
+}
+.duo-title { font-family: var(--f-display); font-weight: 700; font-size: 18px; flex: none; }
+.mark-t { font-family: var(--f-mono); font-weight: 700; color: var(--accent); font-size: 18px; letter-spacing: .3em; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.mark-t svg { width: 150px; height: 70px; }
+.sh { display: inline-block; width: .95em; height: .95em; vertical-align: -.12em; }
+
+.tm-status { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; padding: 8px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); font-size: 13px; color: var(--muted); }
+.tm-status b { color: var(--fg); font-family: var(--f-mono); font-size: 15px; }
+.tm-status .them { margin-left: auto; }
+.tm-status .tag { padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); font-size: 12px; }
+.tm-status .tag.done { border-color: var(--ok); color: var(--ok); }
+.tm-status .tag.out { border-color: var(--danger); color: var(--danger); }
+
+.tm-sec { border: 1px solid var(--line); border-radius: 14px; background: var(--panel); padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.tm-sec h2 { margin: 0; font-size: 14px; font-weight: 600; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+.tm-sec h2 .sp { flex: 1; }
+.tm-code { display: flex; gap: 8px; justify-content: center; }
+.tm-digit { display: flex; flex-direction: column; align-items: center; gap: 4px; flex: 1; max-width: 120px; }
+.tm-digit .big { font-family: var(--f-mono); font-size: 34px; font-weight: 700; line-height: 1; width: 100%; text-align: center; padding: 6px 0; border-radius: 10px; background: var(--card); color: var(--ink); box-shadow: inset 0 -3px 0 rgba(0,0,0,.12); }
+.tm-digit.B .big { border-top: 6px solid var(--B); } .tm-digit.Y .big { border-top: 6px solid var(--Y); } .tm-digit.P .big { border-top: 6px solid var(--P); }
+.tm-digit .row { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 3px; width: 100%; }
+.tm-digit .row button { padding: 6px 0; border-radius: 7px; border: 1px solid var(--line); background: transparent; font-family: var(--f-mono); font-size: 14px; }
+.tm-digit .row button[aria-pressed=true] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.tm-digit .row button:disabled { opacity: .35; }
+.tm-lock { font-size: 12px; color: var(--muted); text-align: center; margin: 0; }
+
+.tm-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.tm-card { position: relative; border-radius: 12px; background: var(--card); color: var(--ink); padding: 10px 10px 8px; display: flex; flex-direction: column; gap: 6px; box-shadow: 0 4px 10px rgba(0,0,0,.35); min-width: 0; overflow: hidden; }
+.tm-card::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 10px; background: repeating-linear-gradient(90deg, transparent 0 9px, rgba(0,0,0,.18) 9px 13px); }
+.tm-card .hd { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.tm-card .letter { font-family: var(--f-mono); font-weight: 700; font-size: 20px; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: var(--ink); color: var(--card); flex: none; }
+.tm-card .name { font-weight: 600; font-size: 13px; line-height: 1.25; }
+.tm-rules { display: flex; flex-direction: column; gap: 3px; }
+.tm-rules button { text-align: left; padding: 4px 7px; border-radius: 6px; border: 1px dashed rgba(42,42,36,.25); background: rgba(255,255,255,.45); color: var(--ink); font-size: 12.5px; line-height: 1.3; }
+.tm-rules button.x { text-decoration: line-through; opacity: .38; }
+.tm-rules button.secret { border: 2px solid var(--accent); background: #fff3d6; font-weight: 700; }
+.tm-res { display: flex; flex-wrap: wrap; gap: 3px; min-height: 18px; }
+.tm-res span { font-family: var(--f-mono); font-size: 11px; padding: 0 5px; border-radius: 4px; color: #fff; }
+.tm-res span.ok { background: #2f8f5b; } .tm-res span.no { background: #b84436; }
+.tm-ask { border: none; border-radius: 8px; padding: 7px; font-weight: 700; font-size: 13px; background: var(--ink); color: var(--card); }
+.tm-ask:disabled { opacity: .3; }
+.tm-ask.flash { animation: flash .6s ease; }
+@keyframes flash { 30% { transform: scale(1.04); } }
+
+.tm-notes { display: grid; grid-template-columns: auto repeat(5, minmax(0, 1fr)); gap: 4px; align-items: center; }
+.tm-notes button { padding: 6px 0; border-radius: 7px; border: 1px solid var(--line); background: transparent; font-family: var(--f-mono); font-size: 14px; }
+.tm-notes button.x { opacity: .3; text-decoration: line-through; }
+.tm-notes .lbl { width: 28px; text-align: center; }
+.tm-log { width: 100%; border-collapse: collapse; font-size: 12.5px; font-family: var(--f-mono); }
+.tm-log th, .tm-log td { padding: 4px 3px; border-bottom: 1px solid var(--line); text-align: center; }
+.tm-log th { color: var(--muted); font-weight: 500; }
+.tm-log td.ok { color: var(--ok); } .tm-log td.no { color: var(--danger); }
+.tm-say { margin: 0; text-align: center; font-size: 14px; text-wrap: balance; min-height: 1.5em; }
+.tm-say em { font-style: normal; color: var(--accent); }
+.tm-actions { display: flex; gap: 8px; }
+.tm-actions .duo-btn { flex: 1; }
+.tm-guess { display: flex; gap: 8px; justify-content: center; }
+.rule-demo { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-family: var(--f-mono); }
+@media (min-width: 560px) { .tm-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+</style>
+</head>
+<body>
+<div class="duo" id="app"></div>
+<div id="layer"></div>
+<script src="../shared/duo.js"></script>
+<script src="engine.js"></script>
+<script>
+(() => {
+"use strict";
+const { esc, rnd, store } = DuoUtil;
+const E = window.TME;
+const LET = "ABCDEF";
+const SHAPE = {
+  B: `<svg class="sh" viewBox="0 0 20 20" aria-label="파랑 세모"><path d="M10 2 L19 18 H1Z" fill="var(--B)"/></svg>`,
+  Y: `<svg class="sh" viewBox="0 0 20 20" aria-label="노랑 네모"><rect x="2" y="2" width="16" height="16" rx="2" fill="var(--Y)"/></svg>`,
+  P: `<svg class="sh" viewBox="0 0 20 20" aria-label="보라 동그라미"><circle cx="10" cy="10" r="8.5" fill="var(--P)"/></svg>`,
+};
+const txt = t => esc(t).replace(/\{([BYP])\}/g, (_, c) => SHAPE[c]);
+const codeHTML = c => c ? `${SHAPE.B}${c[0]} ${SHAPE.Y}${c[1]} ${SHAPE.P}${c[2]}` : "";
+const MARK = `<div class="mark-t"><svg viewBox="0 0 150 70" aria-hidden="true"><rect x="4" y="6" width="142" height="58" rx="8" fill="#f3ebd7"/><g fill="#182126">${Array.from({ length: 24 }, (_, i) => `<rect x="${14 + (i % 12) * 11}" y="${16 + Math.floor(i / 12) * 34}" width="6" height="${i % 3 ? 8 : 14}" rx="1"/>`).join("")}</g><path d="M40 34 L48 48 H32Z" fill="#3b82c4"/><rect x="68" y="34" width="14" height="14" rx="2" fill="#e2b42c"/><circle cx="110" cy="41" r="7.5" fill="#8e5bb5"/></svg>TURING MACHINE</div>`;
+
+const game = {
+  id: "turing",
+  title: "튜링 머신",
+  mark: MARK,
+  tagline: "숨겨진 세 자리 코드를 검증기에 물어보며 논리로 좁혀 가요. 질문을 적게 하고 먼저 맞히는 사람이 이겨요.",
+  options: [{ id: "n", label: "난이도", def: 5, choices: [{ v: 4, label: "쉬움 (검증기 4개)" }, { v: 5, label: "보통 (검증기 5개)" }, { v: 6, label: "어려움 (검증기 6개)" }] }],
+  setup(players, opts) { return E.setup(+opts.n || 5, rnd); },
+  apply(g, seat, a, env) { return E.apply(g, seat, a, env.names); },
+  result(g, ctx) {
+    if (g.phase !== "over") return null;
+    const N = ctx.names;
+    const title = g.winner === "tie" ? "무승부!" : g.winner === "none" ? "둘 다 틀렸어요" : `${esc(N[g.winner])} 님 승리!`;
+    return { title, html: `<p style="text-align:center;margin:0">정답은 <b style="font-family:var(--f-mono);font-size:20px">${codeHTML(g.answer)}</b></p>
+      <table class="duo-table"><tbody>${[0, 1].map(s => `<tr><td>${esc(N[s])}</td><td class="num">질문 ${E.used(g.p[s])}번</td><td>${g.p[s].out ? "탈락" : g.p[s].guess && E.sameCode(g.p[s].guess, g.answer) ? "정답" : "—"}</td></tr>`).join("")}</tbody></table>
+      <p class="sub" style="margin:0">검증기들이 확인하던 조건: ${g.cards.map((c, i) => `<b>${LET[i]}</b> ${txt(E.CARDS[c].rules[g.rules[i]].t)}`).join(" · ")}</p>` };
+  },
+  render(ctx) {
+    const g = ctx.g, N = ctx.names, ui = ctx.ui;
+    const me = ctx.me < 0 ? 0 : ctx.me, op = 1 - me, spect = ctx.me < 0;
+    const P = g.p[me], O = g.p[op];
+    const over = g.phase === "over";
+    const rt = E.roundTests(P, g.round);
+    const locked = rt.length > 0;
+    if (locked) ui.code = rt[0].code.slice();
+    ui.code = ui.code || [null, null, null];
+    const full = ui.code.every(Boolean);
+    const canAsk = !spect && !over && !P.done && !P.out && full && rt.length < 3;
+    // per-puzzle notes kept on this phone
+    const nkey = "turing-notes-" + g.cards.join("") + g.rules.join("");
+    if (ui.nkey !== nkey) { ui.nkey = nkey; ui.notes = store.get(nkey, { d: {}, r: {} }); ui.code = [null, null, null]; }
+    const saveNotes = () => store.set(nkey, ui.notes);
+    ui.saveNotes = saveNotes;
+
+    const st = pl => pl.out ? `<span class="tag out">탈락</span>` : pl.done ? `<span class="tag done">${g.phase === "play" ? "라운드 끝냄" : ""}</span>` : `<span class="tag">진행 중</span>`;
+    const status = `<div class="tm-status"><span>라운드 <b>${g.round}</b></span><span>내 질문 <b>${E.used(P)}</b></span>
+      <span class="them">${esc(N[op])} 질문 <b>${E.used(O)}</b> ${st(O)}</span></div>`;
+
+    const composer = spect ? "" : `<section class="tm-sec" aria-label="제안 코드"><h2>제안 코드<span class="sp"></span>${locked ? "이번 라운드 고정" : ""}</h2>
+      <div class="tm-code">${["B", "Y", "P"].map((c, i) => `<div class="tm-digit ${c}"><div class="big">${ui.code[i] || "·"}</div>
+        <div class="row">${[1, 2, 3, 4, 5].map(v => `<button data-a="dig" data-i="${i}" data-v="${v}" aria-pressed="${ui.code[i] === v}" ${locked || P.done || P.out || over ? "disabled" : ""} aria-label="${SHAPE[c].match(/aria-label="([^"]+)"/)[1]} ${v}">${v}</button>`).join("")}</div></div>`).join("")}</div>
+      <p class="tm-lock">${locked ? `이번 라운드는 이 코드로 검증기 ${3 - rt.length}개를 더 물어볼 수 있어요` : "세 자리를 고른 뒤 아래 검증기에 물어보세요 (라운드마다 최대 3개)"}</p></section>`;
+
+    const cards = `<div class="tm-cards">${g.cards.map((c, i) => {
+      const card = E.CARDS[c];
+      const mine = spect ? [] : P.tests.filter(t => t.card === i);
+      const asked = rt.some(t => t.card === i);
+      const notes = (ui.notes.r[i] || []);
+      return `<article class="tm-card" aria-label="검증기 ${LET[i]}">
+        <div class="hd"><span class="letter">${LET[i]}</span><span class="name">${esc(card.name)}</span></div>
+        <div class="tm-rules">${card.rules.map((r, k) => `<button data-a="note-r" data-i="${i}" data-k="${k}" class="${notes.includes(k) ? "x" : ""} ${over && g.rules[i] === k ? "secret" : ""}">${txt(r.t)}</button>`).join("")}</div>
+        <div class="tm-res">${mine.map(t => `<span class="${t.ok ? "ok" : "no"}">${t.code.join("")} ${t.ok ? "✓" : "✗"}</span>`).join("")}</div>
+        ${spect || over ? "" : `<button class="tm-ask ${ui.flash === i ? "flash" : ""}" data-a="ask" data-i="${i}" ${canAsk && !asked ? "" : "disabled"}>${asked ? "이번 라운드에 물어봤어요" : `${LET[i]}에게 물어보기`}</button>`}
+      </article>`;
+    }).join("")}</div>`;
+
+    const notes = spect ? "" : `<section class="tm-sec" aria-label="메모"><h2>메모 — 아닌 숫자를 눌러 지워 두세요<span class="sp"></span></h2>
+      <div class="tm-notes">${["B", "Y", "P"].map((c, i) => `<span class="lbl">${SHAPE[c]}</span>${[1, 2, 3, 4, 5].map(v => `<button data-a="note-d" data-i="${i}" data-v="${v}" class="${(ui.notes.d[i] || []).includes(v) ? "x" : ""}">${v}</button>`).join("")}`).join("")}</div></section>`;
+
+    const rounds = [...new Set(P.tests.map(t => t.round))];
+    const log = spect || !P.tests.length ? "" : `<section class="tm-sec" aria-label="내 질문 기록"><h2>내 질문 기록</h2>
+      <table class="tm-log"><thead><tr><th>라운드</th><th>코드</th>${g.cards.map((_, i) => `<th>${LET[i]}</th>`).join("")}</tr></thead><tbody>
+      ${rounds.map(r => { const ts = P.tests.filter(t => t.round === r); return `<tr><td>${r}</td><td>${ts[0].code.join("")}</td>${g.cards.map((_, i) => { const t = ts.find(x => x.card === i); return t ? `<td class="${t.ok ? "ok" : "no"}">${t.ok ? "✓" : "✗"}</td>` : "<td>·</td>"; }).join("")}</tr>`; }).join("")}</tbody></table></section>`;
+
+    let say = "", actions = "";
+    if (spect) say = "둘이 푸는 중이에요";
+    else if (over) say = "";
+    else if (P.out) say = `틀려서 탈락했어요. ${esc(N[op])} 님이 끝날 때까지 기다려요.`;
+    else if (P.done) say = `${P.guess ? `정답 ${P.guess.join("")}을 냈어요.` : "이번 라운드를 끝냈어요."} ${esc(N[op])} 님을 기다리는 중…`;
+    else {
+      say = rt.length ? `이번 라운드 질문 ${rt.length}/3. 다 물어봤으면 라운드를 끝내거나 정답에 도전하세요.` : "코드를 고르고 검증기에 물어보세요. 언제든 라운드를 끝낼 수 있어요.";
+      actions = `<div class="tm-actions"><button class="duo-btn" data-a="end"><b>라운드 끝내기</b><span>정답은 아직 몰라요</span></button>
+        <button class="duo-btn primary" data-a="guess-open"><b>정답 도전</b><span>틀리면 탈락이에요</span></button></div>`;
+    }
+    return `${status}${composer}<p class="tm-say">${say}</p>${actions}${cards}${notes}${log}`;
+  },
+  onClick(el, ctx) {
+    const g = ctx.g, ui = ctx.ui, a = el.dataset.a;
+    if (a === "dig") { ui.code[+el.dataset.i] = +el.dataset.v; ctx.rerender(); }
+    else if (a === "ask") {
+      const i = +el.dataset.i;
+      if (!ui.code.every(Boolean)) { ctx.toast("세 자리를 먼저 고르세요"); return; }
+      if (ctx.act({ type: "test", code: ui.code.slice(), card: i })) { ui.flash = i; setTimeout(() => { ui.flash = null; }, 700); }
+    }
+    else if (a === "note-r") { const i = +el.dataset.i, k = +el.dataset.k; const l = ui.notes.r[i] || []; ui.notes.r[i] = l.includes(k) ? l.filter(x => x !== k) : l.concat(k); ui.saveNotes(); ctx.rerender(); }
+    else if (a === "note-d") { const i = +el.dataset.i, v = +el.dataset.v; const l = ui.notes.d[i] || []; ui.notes.d[i] = l.includes(v) ? l.filter(x => x !== v) : l.concat(v); ui.saveNotes(); ctx.rerender(); }
+    else if (a === "end") ctx.act({ type: "end", guess: null });
+    else if (a === "guess-open") {
+      ui.guess = ui.code.every(Boolean) ? ui.code.slice() : [1, 1, 1];
+      openGuess(ctx);
+    }
+    else if (a === "gdig") { ui.guess[+el.dataset.i] = +el.dataset.v; openGuess(ctx); }
+    else if (a === "guess") { if (ctx.act({ type: "end", guess: ui.guess.slice() })) ctx.closeSheet(); }
+  },
+  changed(prev, g, ctx) {
+    const me = ctx.me; if (me < 0) return;
+    const a = prev.p[me].tests.length, b = g.p[me].tests.length;
+    if (b > a) { const t = g.p[me].tests[b - 1]; ctx.toast(`검증기 ${LET[t.card]}: ${t.code.join("")} → ${t.ok ? "✓ 맞아요" : "✗ 아니에요"}`); }
+    if (g.round > prev.round) { ctx.ui.code = [null, null, null]; ctx.toast(`${g.round}라운드 시작`); }
+  },
+  rules: `
+  <p>숨겨진 <b>세 자리 코드</b>를 먼저 알아내는 추리 게임이에요. 자리는 ${SHAPE.B} 파랑 세모, ${SHAPE.Y} 노랑 네모, ${SHAPE.P} 보라 동그라미이고, 각 자리에는 1~5가 들어가요.</p>
+  <h3>검증기</h3>
+  <p>A, B, C… 검증기마다 카드에 조건이 여러 개 적혀 있어요. 검증기는 그중 <b>딱 하나</b>만 몰래 확인해요. 어떤 조건인지는 알려 주지 않아요.</p>
+  <p class="sub">예: "파랑과 3" 카드라면 검증기는 ${SHAPE.B}&lt;3, ${SHAPE.B}=3, ${SHAPE.B}&gt;3 중 하나를 확인해요. 정답 코드는 모든 검증기의 조건을 만족해요.</p>
+  <h3>한 라운드</h3>
+  <ol><li>둘이 동시에, 각자 <b>제안 코드</b> 하나를 정해요.</li>
+  <li>그 코드로 검증기에 <b>최대 3번</b> 물어봐요. 검증기는 그 코드가 자기 조건에 맞으면 ✓, 아니면 ✗를 보여 줘요. 내 결과는 나만 봐요.</li>
+  <li>라운드를 끝내요. 이때 답을 안다면 <b>정답에 도전</b>할 수 있어요.</li></ol>
+  <h3>승패</h3>
+  <ul><li>정답을 맞힌 사람이 이겨요. 둘 다 같은 라운드에 맞히면 <b>질문을 적게 한 사람</b>이 이기고, 질문 수도 같으면 무승부예요.</li>
+  <li>틀린 답을 내면 탈락해요. 남은 사람은 계속 풀어요.</li></ul>
+  <h3>추리 요령</h3>
+  <ul><li>모든 검증기는 <b>꼭 필요</b>해요. 어떤 검증기 없이도 답이 하나로 정해진다면, 그 조건 조합은 틀린 거예요.</li>
+  <li>정답은 <b>딱 하나</b>예요. 그래서 조건만으로 답이 둘 이상 남는 조합도 틀린 거예요.</li>
+  <li>카드의 조건을 누르면 줄이 그어져요. "이 조건은 아니다"라고 메모할 때 쓰세요. 숫자 메모도 아래에 있어요.</li></ul>
+  <h3>이 앱에 대해</h3>
+  <p>퍼즐은 매번 새로 만들어요. 원작처럼 논리만으로 답이 하나로 정해지는 퍼즐만 나와요. 검증기 카드의 조건은 원작과 같은 종류로 이 앱에서 만든 거예요.</p>`,
+};
+function openGuess(ctx) {
+  const ui = ctx.ui;
+  ctx.sheet(`<h2>정답 도전</h2><p class="sub">틀리면 탈락해요. 확신이 있을 때만!</p>
+    <div class="tm-code">${["B", "Y", "P"].map((c, i) => `<div class="tm-digit ${c}"><div class="big">${ui.guess[i]}</div>
+      <div class="row">${[1, 2, 3, 4, 5].map(v => `<button data-a="gdig" data-i="${i}" data-v="${v}" aria-pressed="${ui.guess[i] === v}">${v}</button>`).join("")}</div></div>`).join("")}</div>
+    <div class="tm-actions"><button class="duo-btn primary center" data-a="guess"><b>${ui.guess.join("")} — 이걸로 도전</b><span>상대도 라운드를 끝내면 결과가 나와요</span></button></div>`, { label: "정답 도전", keep: true });
+}
+Duo(game);
+})();
+</script>
+</body>
+</html>

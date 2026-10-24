@@ -10,6 +10,7 @@
 | 쿼리도 | `quoridor/` |
 | 우봉고 | `ubongo/` |
 | 바퀴벌레 포커 | `cockroach/` |
+| 튜링 머신 | `turing/` (조건 카드·퍼즐 생성은 `engine.js`) |
 | 화이트홀 미스터리 | `whitehall/` (규칙 엔진과 지도는 `engine.js`) |
 | 스플렌더 대결 | `splendor-duel/` (규칙 엔진은 `engine.js`) |
 
