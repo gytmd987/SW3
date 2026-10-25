@@ -94,6 +94,12 @@ body {
 .tm-actions .duo-btn { flex: 1; }
 .tm-guess { display: flex; gap: 8px; justify-content: center; }
 .rule-demo { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-family: var(--f-mono); }
+.tm-or { font-size: 11px; color: rgba(42,42,36,.55); text-align: center; letter-spacing: .1em; border-top: 1px dashed rgba(42,42,36,.3); padding-top: 4px; }
+.tm-who { margin-left: auto; border: 1px dashed rgba(42,42,36,.4); background: rgba(255,255,255,.5); color: var(--ink); border-radius: 999px; padding: 3px 10px; font-size: 12px; font-weight: 600; }
+.tm-vers { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.tm-ver { display: flex; flex-direction: column; gap: 4px; padding: 6px; border: 1px solid var(--line); border-radius: 10px; }
+.tm-ver > b { font-family: var(--f-mono); font-size: 18px; text-align: center; }
+.tm-ver .tm-ask { padding: 6px 2px; font-size: 12px; }
 @media (min-width: 560px) { .tm-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 </style>
 </head>
@@ -122,8 +128,12 @@ const game = {
   title: "튜링 머신",
   mark: MARK,
   tagline: "숨겨진 세 자리 코드를 검증기에 물어보며 논리로 좁혀 가요. 질문을 적게 하고 먼저 맞히는 사람이 이겨요.",
-  options: [{ id: "n", label: "난이도", def: 5, choices: [{ v: 4, label: "쉬움 (검증기 4개)" }, { v: 5, label: "보통 (검증기 5개)" }, { v: 6, label: "어려움 (검증기 6개)" }] }],
-  setup(players, opts) { return E.setup(+opts.n || 5, rnd); },
+  options: [
+    { id: "mode", label: "모드", def: "classic", choices: [{ v: "classic", label: "기본 (검증기마다 카드 1장)" }, { v: "extreme", label: "극한 (검증기마다 카드 2장)" }, { v: "nightmare", label: "악몽 (어느 검증기가 어느 카드인지 몰라요)" }] },
+    { id: "n", label: "검증기 수", def: 5, choices: [{ v: 4, label: "4개" }, { v: 5, label: "5개" }, { v: 6, label: "6개" }] },
+    { id: "level", label: "카드", def: "hard", choices: [{ v: "normal", label: "보통 (조건이 적은 카드도 섞여요)" }, { v: "hard", label: "어려움 (조건이 많은 카드 위주)" }] },
+  ],
+  setup(players, opts) { return E.setup(+opts.n || 5, rnd, { mode: opts.mode || "classic", hard: opts.level !== "normal" }); },
   apply(g, seat, a, env) { return E.apply(g, seat, a, env.names); },
   result(g, ctx) {
     if (g.phase !== "over") return null;
@@ -131,7 +141,7 @@ const game = {
     const title = g.winner === "tie" ? "무승부!" : g.winner === "none" ? "둘 다 틀렸어요" : `${esc(N[g.winner])} 님 승리!`;
     return { title, html: `<p style="text-align:center;margin:0">정답은 <b style="font-family:var(--f-mono);font-size:20px">${codeHTML(g.answer)}</b></p>
       <table class="duo-table"><tbody>${[0, 1].map(s => `<tr><td>${esc(N[s])}</td><td class="num">질문 ${E.used(g.p[s])}번</td><td>${g.p[s].out ? "탈락" : g.p[s].guess && E.sameCode(g.p[s].guess, g.answer) ? "정답" : "—"}</td></tr>`).join("")}</tbody></table>
-      <p class="sub" style="margin:0">검증기들이 확인하던 조건: ${g.cards.map((c, i) => `<b>${LET[i]}</b> ${txt(E.CARDS[c].rules[g.rules[i]].t)}`).join(" · ")}</p>` };
+      <p class="sub" style="margin:0">검증기들이 확인하던 조건: ${g.slots.map((_, v) => { const sl = E.slotOf(g, v); return `<b>${LET[v]}</b>${g.perm ? ` (카드 ${sl + 1})` : ""} ${txt(E.ruleOf(g, sl).t)}`; }).join(" · ")}</p>` };
   },
   render(ctx) {
     const g = ctx.g, N = ctx.names, ui = ctx.ui;
@@ -145,8 +155,8 @@ const game = {
     const full = ui.code.every(Boolean);
     const canAsk = !spect && !over && !P.done && !P.out && full && rt.length < 3;
     // per-puzzle notes kept on this phone
-    const nkey = "turing-notes-" + g.cards.join("") + g.rules.join("");
-    if (ui.nkey !== nkey) { ui.nkey = nkey; ui.notes = store.get(nkey, { d: {}, r: {} }); ui.code = [null, null, null]; }
+    const nkey = "turing-notes-" + g.mode + g.slots.map(sl => sl.join(".")).join("-") + g.rules.join("") + (g.perm || []).join("");
+    if (ui.nkey !== nkey) { ui.nkey = nkey; ui.notes = store.get(nkey, { d: {}, r: {}, v: {} }); ui.notes.v = ui.notes.v || {}; ui.code = [null, null, null]; }
     const saveNotes = () => store.set(nkey, ui.notes);
     ui.saveNotes = saveNotes;
 
@@ -159,26 +169,38 @@ const game = {
         <div class="row">${[1, 2, 3, 4, 5].map(v => `<button data-a="dig" data-i="${i}" data-v="${v}" aria-pressed="${ui.code[i] === v}" ${locked || P.done || P.out || over ? "disabled" : ""} aria-label="${SHAPE[c].match(/aria-label="([^"]+)"/)[1]} ${v}">${v}</button>`).join("")}</div></div>`).join("")}</div>
       <p class="tm-lock">${locked ? `이번 라운드는 이 코드로 검증기 ${3 - rt.length}개를 더 물어볼 수 있어요` : "세 자리를 고른 뒤 아래 검증기에 물어보세요 (라운드마다 최대 3개)"}</p></section>`;
 
-    const cards = `<div class="tm-cards">${g.cards.map((c, i) => {
-      const card = E.CARDS[c];
-      const mine = spect ? [] : P.tests.filter(t => t.card === i);
-      const asked = rt.some(t => t.card === i);
-      const notes = (ui.notes.r[i] || []);
-      return `<article class="tm-card" aria-label="검증기 ${LET[i]}">
-        <div class="hd"><span class="letter">${LET[i]}</span><span class="name">${esc(card.name)}</span></div>
-        <div class="tm-rules">${card.rules.map((r, k) => `<button data-a="note-r" data-i="${i}" data-k="${k}" class="${notes.includes(k) ? "x" : ""} ${over && g.rules[i] === k ? "secret" : ""}">${txt(r.t)}</button>`).join("")}</div>
-        <div class="tm-res">${mine.map(t => `<span class="${t.ok ? "ok" : "no"}">${t.code.join("")} ${t.ok ? "✓" : "✗"}</span>`).join("")}</div>
-        ${spect || over ? "" : `<button class="tm-ask ${ui.flash === i ? "flash" : ""}" data-a="ask" data-i="${i}" ${canAsk && !asked ? "" : "disabled"}>${asked ? "이번 라운드에 물어봤어요" : `${LET[i]}에게 물어보기`}</button>`}
+    const nm = !!g.perm, n = g.slots.length;
+    const askBtn = v => {
+      const asked = rt.some(t => t.card === v);
+      return spect || over ? "" : `<button class="tm-ask ${ui.flash === v ? "flash" : ""}" data-a="ask" data-i="${v}" ${canAsk && !asked ? "" : "disabled"}>${asked ? (nm ? `${LET[v]} ✓` : "이번 라운드에 물어봤어요") : `${LET[v]}에게 물어보기`}</button>`;
+    };
+    const resOf = v => `<div class="tm-res">${(spect ? [] : P.tests.filter(t => t.card === v)).map(t => `<span class="${t.ok ? "ok" : "no"}">${t.code.join("")} ${t.ok ? "✓" : "✗"}</span>`).join("")}</div>`;
+    // 카드 자리(slot). 기본·극한에선 검증기 v = 자리 v, 악몽에선 섞여 있어요
+    const cards = `<div class="tm-cards">${g.slots.map((slot, i) => {
+      const notes = (ui.notes.r[i] || []), secret = over ? g.rules[i] : -1;
+      let k0 = 0;
+      const body = slot.map((c, j) => {
+        const card = E.CARDS[c], base = k0; k0 += card.rules.length;
+        return `${j ? `<div class="tm-or">또는</div>` : ""}<div class="name">${esc(card.name)}</div>
+          <div class="tm-rules">${card.rules.map((r, k) => `<button data-a="note-r" data-i="${i}" data-k="${base + k}" class="${notes.includes(base + k) ? "x" : ""} ${secret === base + k ? "secret" : ""}">${txt(r.t)}</button>`).join("")}</div>`;
+      }).join("");
+      const who = nm ? (over ? `검증기 ${LET[g.perm.indexOf(i)]}` : (ui.notes.v[i] != null ? `${LET[ui.notes.v[i]]}?` : "")) : "";
+      return `<article class="tm-card ${slot.length > 1 ? "two" : ""}" aria-label="${nm ? `카드 ${i + 1}` : `검증기 ${LET[i]}`}">
+        <div class="hd"><span class="letter">${nm ? i + 1 : LET[i]}</span>${nm ? `<button class="tm-who" data-a="note-v" data-i="${i}" ${over ? "disabled" : ""}>${who || "검증기 ?"}</button>` : ""}</div>
+        ${body}
+        ${nm ? "" : resOf(i) + askBtn(i)}
       </article>`;
     }).join("")}</div>`;
+    const machines = !nm ? "" : `<section class="tm-sec" aria-label="검증기"><h2>검증기 — 어느 카드를 보는지 몰라요<span class="sp"></span></h2>
+      <div class="tm-vers">${g.slots.map((_, v) => `<div class="tm-ver"><b>${LET[v]}</b>${resOf(v)}${askBtn(v)}</div>`).join("")}</div></section>`;
 
     const notes = spect ? "" : `<section class="tm-sec" aria-label="메모"><h2>메모 — 아닌 숫자를 눌러 지워 두세요<span class="sp"></span></h2>
       <div class="tm-notes">${["B", "Y", "P"].map((c, i) => `<span class="lbl">${SHAPE[c]}</span>${[1, 2, 3, 4, 5].map(v => `<button data-a="note-d" data-i="${i}" data-v="${v}" class="${(ui.notes.d[i] || []).includes(v) ? "x" : ""}">${v}</button>`).join("")}`).join("")}</div></section>`;
 
     const rounds = [...new Set(P.tests.map(t => t.round))];
     const log = spect || !P.tests.length ? "" : `<section class="tm-sec" aria-label="내 질문 기록"><h2>내 질문 기록</h2>
-      <table class="tm-log"><thead><tr><th>라운드</th><th>코드</th>${g.cards.map((_, i) => `<th>${LET[i]}</th>`).join("")}</tr></thead><tbody>
-      ${rounds.map(r => { const ts = P.tests.filter(t => t.round === r); return `<tr><td>${r}</td><td>${ts[0].code.join("")}</td>${g.cards.map((_, i) => { const t = ts.find(x => x.card === i); return t ? `<td class="${t.ok ? "ok" : "no"}">${t.ok ? "✓" : "✗"}</td>` : "<td>·</td>"; }).join("")}</tr>`; }).join("")}</tbody></table></section>`;
+      <table class="tm-log"><thead><tr><th>라운드</th><th>코드</th>${g.slots.map((_, i) => `<th>${LET[i]}</th>`).join("")}</tr></thead><tbody>
+      ${rounds.map(r => { const ts = P.tests.filter(t => t.round === r); return `<tr><td>${r}</td><td>${ts[0].code.join("")}</td>${g.slots.map((_, i) => { const t = ts.find(x => x.card === i); return t ? `<td class="${t.ok ? "ok" : "no"}">${t.ok ? "✓" : "✗"}</td>` : "<td>·</td>"; }).join("")}</tr>`; }).join("")}</tbody></table></section>`;
 
     let say = "", actions = "";
     if (spect) say = "둘이 푸는 중이에요";
@@ -190,7 +212,7 @@ const game = {
       actions = `<div class="tm-actions"><button class="duo-btn" data-a="end"><b>라운드 끝내기</b><span>정답은 아직 몰라요</span></button>
         <button class="duo-btn primary" data-a="guess-open"><b>정답 도전</b><span>틀리면 탈락이에요</span></button></div>`;
     }
-    return `${status}${composer}<p class="tm-say">${say}</p>${actions}${cards}${notes}${log}`;
+    return `${status}${composer}<p class="tm-say">${say}</p>${actions}${machines}${cards}${notes}${log}`;
   },
   onClick(el, ctx) {
     const g = ctx.g, ui = ctx.ui, a = el.dataset.a;
@@ -201,6 +223,7 @@ const game = {
       if (ctx.act({ type: "test", code: ui.code.slice(), card: i })) { ui.flash = i; setTimeout(() => { ui.flash = null; }, 700); }
     }
     else if (a === "note-r") { const i = +el.dataset.i, k = +el.dataset.k; const l = ui.notes.r[i] || []; ui.notes.r[i] = l.includes(k) ? l.filter(x => x !== k) : l.concat(k); ui.saveNotes(); ctx.rerender(); }
+    else if (a === "note-v") { const i = +el.dataset.i, c = ui.notes.v[i]; const nx = c == null ? 0 : c + 1; if (nx >= g.slots.length) delete ui.notes.v[i]; else ui.notes.v[i] = nx; ui.saveNotes(); ctx.rerender(); }
     else if (a === "note-d") { const i = +el.dataset.i, v = +el.dataset.v; const l = ui.notes.d[i] || []; ui.notes.d[i] = l.includes(v) ? l.filter(x => x !== v) : l.concat(v); ui.saveNotes(); ctx.rerender(); }
     else if (a === "end") ctx.act({ type: "end", guess: null });
     else if (a === "guess-open") {
@@ -232,8 +255,13 @@ const game = {
   <ul><li>모든 검증기는 <b>꼭 필요</b>해요. 어떤 검증기 없이도 답이 하나로 정해진다면, 그 조건 조합은 틀린 거예요.</li>
   <li>정답은 <b>딱 하나</b>예요. 그래서 조건만으로 답이 둘 이상 남는 조합도 틀린 거예요.</li>
   <li>카드의 조건을 누르면 줄이 그어져요. "이 조건은 아니다"라고 메모할 때 쓰세요. 숫자 메모도 아래에 있어요.</li></ul>
+  <h3>모드</h3>
+  <ul><li><b>기본</b> — 검증기마다 카드가 1장이에요.</li>
+  <li><b>극한</b> — 검증기마다 카드가 2장이에요. 검증기는 두 장에 적힌 조건 전체 중 하나를 확인해요. 어느 카드인지부터 추리해야 해요.</li>
+  <li><b>악몽</b> — 카드는 보이지만 어느 검증기가 어느 카드를 쓰는지 섞여 있어요. 검증기 A~F에 물어본 결과로 짝까지 맞혀야 해요. 카드 위 "검증기 ?"를 눌러 짐작한 짝을 메모할 수 있어요.</li></ul>
+  <p class="sub">"카드: 어려움"을 고르면 조건이 6~9개인 넓은 카드(예: "어떤 색과 3", "어떤 수가 몇 개")가 많이 나와요.</p>
   <h3>이 앱에 대해</h3>
-  <p>퍼즐은 매번 새로 만들어요. 원작처럼 논리만으로 답이 하나로 정해지는 퍼즐만 나와요. 검증기 카드의 조건은 원작과 같은 종류로 이 앱에서 만든 거예요.</p>`,
+  <p>원작은 조건 카드가 48장이고, 카드마다 조건이 2~9개예요. 이 앱은 원작과 같은 종류로 만든 카드 59장을 써요. 퍼즐은 매번 새로 만들고, 원작처럼 논리만으로 답이 하나로 정해지는 퍼즐만 나와요.</p>`,
 };
 function openGuess(ctx) {
   const ui = ctx.ui;
