@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;600;700&family=IBM+Plex+Mono:wght@500;700&display=swap">
-<link rel="stylesheet" href="../shared/duo.css?v=7d92867">
+<link rel="stylesheet" href="../shared/duo.css?v=7c30d51">
 <style>
 /* Layout: a steel machine console — the punch-card code composer at the top, the verifier cards in a grid below it, notes and the test log underneath. */
 :root {
@@ -106,8 +106,8 @@ body {
 <body>
 <div class="duo" id="app"></div>
 <div id="layer"></div>
-<script src="../shared/duo.js?v=7d92867"></script>
-<script src="engine.js?v=7d92867"></script>
+<script src="../shared/duo.js?v=7c30d51"></script>
+<script src="engine.js?v=7c30d51"></script>
 <script>
 (() => {
 "use strict";
@@ -125,28 +125,35 @@ const MARK = `<div class="mark-t"><svg viewBox="0 0 150 70" aria-hidden="true"><
 
 const game = {
   id: "turing",
+  solo: true,
   title: "튜링 머신",
   mark: MARK,
   tagline: "숨겨진 세 자리 코드를 검증기에 물어보며 논리로 좁혀 가요. 질문을 적게 하고 먼저 맞히는 사람이 이겨요.",
   options: [
-    { id: "mode", label: "모드", def: "classic", choices: [{ v: "classic", label: "기본 (검증기마다 카드 1장)" }, { v: "extreme", label: "극한 (검증기마다 카드 2장)" }, { v: "nightmare", label: "악몽 (어느 검증기가 어느 카드인지 몰라요)" }] },
+    { id: "mode", label: "모드", def: "classic", choices: [{ v: "classic", label: "기본" }, { v: "extreme", label: "극한 (카드 2장씩)" }, { v: "nightmare", label: "악몽 (짝이 섞임)" }] },
     { id: "n", label: "검증기 수", def: 5, choices: [{ v: 4, label: "4개" }, { v: 5, label: "5개" }, { v: 6, label: "6개" }] },
-    { id: "level", label: "카드", def: "hard", choices: [{ v: "normal", label: "보통 (조건이 적은 카드도 섞여요)" }, { v: "hard", label: "어려움 (조건이 많은 카드 위주)" }] },
+    { id: "level", label: "카드", def: "hard", choices: [{ v: "normal", label: "보통" }, { v: "hard", label: "어려움 (조건 많은 카드)" }] },
   ],
-  setup(players, opts) { return E.setup(+opts.n || 5, rnd, { mode: opts.mode || "classic", hard: opts.level !== "normal" }); },
+  setup(players, opts, env) { return E.setup(+opts.n || 5, rnd, { mode: opts.mode || "classic", hard: opts.level !== "normal", solo: !!(env && env.solo) }); },
   apply(g, seat, a, env) { return E.apply(g, seat, a, env.names); },
   result(g, ctx) {
     if (g.phase !== "over") return null;
     const N = ctx.names;
+    const why = `<p class="sub" style="margin:0">검증기들이 확인하던 조건: ${g.slots.map((_, v) => { const sl = E.slotOf(g, v); return `<b>${LET[v]}</b>${g.perm ? ` (카드 ${sl + 1})` : ""} ${txt(E.ruleOf(g, sl).t)}`; }).join(" · ")}</p>`;
+    if (g.solo) {
+      const P = g.p[0], miss = P.miss || 0;
+      return { title: "정답!", html: `<p style="text-align:center;margin:0">정답은 <b style="font-family:var(--f-mono);font-size:20px">${codeHTML(g.answer)}</b></p>
+        <table class="duo-table"><tbody><tr><td>라운드</td><td class="num">${g.round}</td></tr><tr><td>질문</td><td class="num">${E.used(P)}번</td></tr><tr><td>틀린 도전</td><td class="num">${miss}번</td></tr></tbody></table>${why}` };
+    }
     const title = g.winner === "tie" ? "무승부!" : g.winner === "none" ? "둘 다 틀렸어요" : `${esc(N[g.winner])} 님 승리!`;
     return { title, html: `<p style="text-align:center;margin:0">정답은 <b style="font-family:var(--f-mono);font-size:20px">${codeHTML(g.answer)}</b></p>
       <table class="duo-table"><tbody>${[0, 1].map(s => `<tr><td>${esc(N[s])}</td><td class="num">질문 ${E.used(g.p[s])}번</td><td>${g.p[s].out ? "탈락" : g.p[s].guess && E.sameCode(g.p[s].guess, g.answer) ? "정답" : "—"}</td></tr>`).join("")}</tbody></table>
-      <p class="sub" style="margin:0">검증기들이 확인하던 조건: ${g.slots.map((_, v) => { const sl = E.slotOf(g, v); return `<b>${LET[v]}</b>${g.perm ? ` (카드 ${sl + 1})` : ""} ${txt(E.ruleOf(g, sl).t)}`; }).join(" · ")}</p>` };
+      ${why}` };
   },
   render(ctx) {
     const g = ctx.g, N = ctx.names, ui = ctx.ui;
     const me = ctx.me < 0 ? 0 : ctx.me, op = 1 - me, spect = ctx.me < 0;
-    const P = g.p[me], O = g.p[op];
+    const P = g.p[me], O = g.p[op] || null;
     const over = g.phase === "over";
     const rt = E.roundTests(P, g.round);
     const locked = rt.length > 0;
@@ -162,7 +169,7 @@ const game = {
 
     const st = pl => pl.out ? `<span class="tag out">탈락</span>` : pl.done ? `<span class="tag done">${g.phase === "play" ? "라운드 끝냄" : ""}</span>` : `<span class="tag">진행 중</span>`;
     const status = `<div class="tm-status"><span>라운드 <b>${g.round}</b></span><span>내 질문 <b>${E.used(P)}</b></span>
-      <span class="them">${esc(N[op])} 질문 <b>${E.used(O)}</b> ${st(O)}</span></div>`;
+      ${O ? `<span class="them">${esc(N[op])} 질문 <b>${E.used(O)}</b> ${st(O)}</span>` : `<span class="them">혼자 연습${P.miss ? ` · 틀린 도전 <b>${P.miss}</b>` : ""}</span>`}</div>`;
 
     const composer = spect ? "" : `<section class="tm-sec" aria-label="제안 코드"><h2>제안 코드<span class="sp"></span>${locked ? "이번 라운드 고정" : ""}</h2>
       <div class="tm-code">${["B", "Y", "P"].map((c, i) => `<div class="tm-digit ${c}"><div class="big">${ui.code[i] || "·"}</div>
@@ -210,7 +217,7 @@ const game = {
     else {
       say = rt.length ? `이번 라운드 질문 ${rt.length}/3. 다 물어봤으면 라운드를 끝내거나 정답에 도전하세요.` : "코드를 고르고 검증기에 물어보세요. 언제든 라운드를 끝낼 수 있어요.";
       actions = `<div class="tm-actions"><button class="duo-btn" data-a="end"><b>라운드 끝내기</b><span>정답은 아직 몰라요</span></button>
-        <button class="duo-btn primary" data-a="guess-open"><b>정답 도전</b><span>틀리면 탈락이에요</span></button></div>`;
+        <button class="duo-btn primary" data-a="guess-open"><b>정답 도전</b><span>${g.solo ? "연습이라 틀려도 계속해요" : "틀리면 탈락이에요"}</span></button></div>`;
     }
     return `${status}${composer}<p class="tm-say">${say}</p>${actions}${machines}${cards}${notes}${log}`;
   },
@@ -237,7 +244,8 @@ const game = {
     const me = ctx.me; if (me < 0) return;
     const a = prev.p[me].tests.length, b = g.p[me].tests.length;
     if (b > a) { const t = g.p[me].tests[b - 1]; ctx.toast(`검증기 ${LET[t.card]}: ${t.code.join("")} → ${t.ok ? "✓ 맞아요" : "✗ 아니에요"}`); }
-    if (g.round > prev.round) { ctx.ui.code = [null, null, null]; ctx.toast(`${g.round}라운드 시작`); }
+    const missed = g.solo && (g.p[0].miss || 0) > (prev.p[0].miss || 0);
+    if (g.round > prev.round) { ctx.ui.code = [null, null, null]; ctx.toast(missed ? `틀렸어요. ${g.round}라운드에서 계속 풀어 보세요` : `${g.round}라운드 시작`); }
   },
   rules: `
   <p>숨겨진 <b>세 자리 코드</b>를 먼저 알아내는 추리 게임이에요. 자리는 ${SHAPE.B} 파랑 세모, ${SHAPE.Y} 노랑 네모, ${SHAPE.P} 보라 동그라미이고, 각 자리에는 1~5가 들어가요.</p>
@@ -260,15 +268,17 @@ const game = {
   <li><b>극한</b> — 검증기마다 카드가 2장이에요. 검증기는 두 장에 적힌 조건 전체 중 하나를 확인해요. 어느 카드인지부터 추리해야 해요.</li>
   <li><b>악몽</b> — 카드는 보이지만 어느 검증기가 어느 카드를 쓰는지 섞여 있어요. 검증기 A~F에 물어본 결과로 짝까지 맞혀야 해요. 카드 위 "검증기 ?"를 눌러 짐작한 짝을 메모할 수 있어요.</li></ul>
   <p class="sub">"카드: 어려움"을 고르면 조건이 6~9개인 넓은 카드(예: "어떤 색과 3", "어떤 수가 몇 개")가 많이 나와요.</p>
+  <h3>혼자 연습</h3>
+  <p>처음 화면의 "혼자 연습"을 누르면 이 폰에서만 혼자 풀어요. 위에서 고른 모드·검증기 수·카드 설정을 그대로 써요. 정답 도전에 틀려도 탈락하지 않고, 틀린 횟수만 기록돼요. 연습하는 동안에도 상대와의 연결은 유지돼요.</p>
   <h3>이 앱에 대해</h3>
   <p>원작은 조건 카드가 48장이고, 카드마다 조건이 2~9개예요. 이 앱은 원작과 같은 종류로 만든 카드 59장을 써요. 퍼즐은 매번 새로 만들고, 원작처럼 논리만으로 답이 하나로 정해지는 퍼즐만 나와요.</p>`,
 };
 function openGuess(ctx) {
   const ui = ctx.ui;
-  ctx.sheet(`<h2>정답 도전</h2><p class="sub">틀리면 탈락해요. 확신이 있을 때만!</p>
+  ctx.sheet(`<h2>정답 도전</h2><p class="sub">${ctx.g.solo ? "연습이라 틀려도 계속 풀 수 있어요. 틀린 횟수는 기록돼요." : "틀리면 탈락해요. 확신이 있을 때만!"}</p>
     <div class="tm-code">${["B", "Y", "P"].map((c, i) => `<div class="tm-digit ${c}"><div class="big">${ui.guess[i]}</div>
       <div class="row">${[1, 2, 3, 4, 5].map(v => `<button data-a="gdig" data-i="${i}" data-v="${v}" aria-pressed="${ui.guess[i] === v}">${v}</button>`).join("")}</div></div>`).join("")}</div>
-    <div class="tm-actions"><button class="duo-btn primary center" data-a="guess"><b>${ui.guess.join("")} — 이걸로 도전</b><span>상대도 라운드를 끝내면 결과가 나와요</span></button></div>`, { label: "정답 도전", keep: true });
+    <div class="tm-actions"><button class="duo-btn primary center" data-a="guess"><b>${ui.guess.join("")} — 이걸로 도전</b><span>${ctx.g.solo ? "바로 결과가 나와요" : "상대도 라운드를 끝내면 결과가 나와요"}</span></button></div>`, { label: "정답 도전", keep: true });
 }
 Duo(game);
 })();
