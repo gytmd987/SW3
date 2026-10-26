@@ -12,6 +12,8 @@
  *                                             until the game calls ctx.flush()
  *   changed(prev, g, ctx) (optional)          after a new state arrives (animations)
  *   result(g, ctx) -> {title, html} | null    game over summary
+ *   solo (optional)                           true = the lobby offers "혼자 연습"; setup gets env.solo,
+ *                                             the game runs on this phone only with one player
  *
  * Online play: there is one table per game. Whoever opens the game first holds the table
  * (the "host"); the other page joins it automatically. The guest sends its moves as
@@ -53,7 +55,8 @@ window.Duo = function (game) {
     myId: (() => { let id = store.get("hanabi-id", null); if (!id) { id = "p" + Date.now().toString(36) + rnd(1e9).toString(36); store.set("hanabi-id", id); } return id; })(),
     net: window.RTCPeerConnection ? "peer" : null,
     room: null, isHost: false, peer: null, conn: null, peerStatus: "idle", guestId: null,
-    pending: [], aid: 0, lastAid: 0, lastRx: 0,
+    pending: [], aid: 0, lastAid: 0, lastRx: 0, peerAway: false, tries: 0,
+    inSolo: false, solo: game.solo ? store.get(K("solo"), null) : null,
     online: null,
     sheet: null, armed: null, error: "",
     opts: Object.assign({}, defaults, store.get(K("opts"), {})),
@@ -61,7 +64,7 @@ window.Duo = function (game) {
   };
 
   /* ───── state helpers ───── */
-  const current = () => ui.online;
+  const current = () => (ui.inSolo ? ui.solo : ui.online);
   const names = s => (s && s.players ? s.players.map(p => p.name) : ["", ""]);
   function mySeat(s) {
     if (!s || !s.players) return -1;
@@ -79,6 +82,7 @@ window.Duo = function (game) {
   function afterChange(prev, next) {
     if (ui.sheet && ui.sheet.kind === "game" && prev && next && prev.seq !== next.seq && !ui.sheet.keep) ui.sheet = null;
     render();
+    if (next !== current()) return;                    // 혼자 연습 중에 온 온라인 상태 → 애니메이션은 생략
     if (game.changed && prev && next && prev.game && next.game && prev.seq !== next.seq && next.status === "playing") {
       try { game.changed(prev.game, next.game, ctxFor(next)); } catch (e) { console.error(e); }
     }
@@ -96,6 +100,7 @@ window.Duo = function (game) {
     let g2 = null;
     try { g2 = game.apply(clone(s.game), seat, action, env(s)); } catch (e) { console.error(e); }
     if (!g2) return false;
+    if (ui.inSolo) { const next = Object.assign({}, s, { game: g2, seq: s.seq + 1 }); ui.solo = next; store.set(K("solo"), next); afterChange(s, next); return true; }
     if (!ui.isHost) {
       if (!ui.conn) { toast("방장과 연결이 끊겨 있어요. 다시 연결되면 해 주세요."); return false; }
       queue({ kind: "act", action });
@@ -115,6 +120,7 @@ window.Duo = function (game) {
 
   /* lobby commands: start / again / lobby / opts */
   function command(cmd, arg) {
+    if (ui.inSolo) { soloCommand(cmd); return; }
     if (!ui.isHost) { if (!ui.conn) { toast("방장과 연결이 끊겨 있어요"); return; } queue({ kind: "cmd", cmd, arg }); return; }
     runCommand(cmd, arg);
   }
@@ -156,7 +162,7 @@ window.Duo = function (game) {
     return tryLoad("../vendor/peerjs.min.js").catch(() => tryLoad("https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"));
   }
   let retryTimer = null;
-  const retry = (ms, asHost) => { clearTimeout(retryTimer); retryTimer = setTimeout(() => { if (ui.room) startPeer(asHost); }, ms + rnd(700)); };
+  const retry = (ms, asHost) => { clearTimeout(retryTimer); retryTimer = setTimeout(() => { retryTimer = null; if (ui.room) startPeer(asHost); }, ms + rnd(700)); };
   function lobbyState() { return { v: 1, status: "lobby", players: [{ id: ui.myId, name: ui.name }], opts: Object.assign({}, ui.opts), seq: 1, game: null }; }
 
   async function join() {
@@ -186,22 +192,31 @@ window.Duo = function (game) {
     ui.ep = store.get(RK("myep"), null);
     if (!ui.ep) { ui.ep = "e" + Date.now().toString(36) + rnd(1e6).toString(36); store.set(RK("myep"), ui.ep); store.set(RK("aid"), 0); ui.aid = 0; }
   }
+  // 버린 연결은 표시를 해 두고 닫는다. 표시가 없으면 닫는 도중 "disconnected"가 와서 다시 붙어 버리고,
+  // 그게 판 이름을 계속 쥐고 있어 아무도 못 들어오게 된다.
+  function killPeer(p) { if (!p) return; p._dead = true; try { p.destroy(); } catch (e) {} }
+  const dbg = params.get("debug") ? (...a) => console.log("[duo]", ...a) : () => {};
   function startPeer(asHost) {
     if (!ui.room) return;
-    try { ui.peer && ui.peer.destroy(); } catch (e) {}
-    ui.conn = null;
+    dbg("startPeer", asHost ? "host" : "guest");
+    clearTimeout(retryTimer); retryTimer = null;
+    killPeer(ui.peer);
+    ui.conn = null; ui.peerAway = false; ui.peerT = Date.now();
     const peer = asHost ? new Peer(TABLE_ID, peerOptions()) : new Peer(peerOptions());
     ui.peer = peer;
     peer.on("open", () => {
       if (ui.peer !== peer) return;
+      dbg("open", peer.id);
       if (asHost) becomeHost();
       else { becomeGuest(); connectToHost(); }
     });
     peer.on("connection", conn => { if (ui.isHost && ui.peer === peer) attach(conn); });
-    peer.on("disconnected", () => { if (ui.peer === peer && !peer.destroyed) { try { peer.reconnect(); } catch (e) {} } });
+    // 중개 서버와 끊김(폰 화면이 꺼졌다 켜질 때 흔함) → 다시 붙는다. 안 되면 2초 점검이 처음부터 다시 시작해요
+    peer.on("disconnected", () => { if (ui.peer === peer && !peer._dead && !peer.destroyed) { ui.reT = Date.now(); try { peer.reconnect(); } catch (e) {} } });
     peer.on("error", err => {
       if (ui.peer !== peer) return;
       const t = err && err.type;
+      dbg("error", t);
       if (t === "unavailable-id") retry(200, false);           // 이미 누가 자리에 있다 → 그쪽에 붙기
       else if (t === "peer-unavailable") { ui.peerStatus = "waiting"; render(); retry(800, true); }   // 자리가 비었다 → 내가 차지
       else if (t === "browser-incompatible") { ui.peerStatus = "error"; ui.error = "이 브라우저는 온라인 연결을 지원하지 않아요. 크롬이나 사파리로 열어 주세요."; render(); }
@@ -212,23 +227,35 @@ window.Duo = function (game) {
     if (!ui.peer || ui.peer.destroyed) return;
     const peer = ui.peer;
     const conn = peer.connect(TABLE_ID, { reliable: true, serialization: "json" });
+    ui.tries += 1; ui.peerStatus = "connecting"; render();
     attach(conn);
     // 상대 페이지가 갑자기 꺼졌으면 자리 이름이 한동안 남아 있다 → 잠시 뒤 내가 차지해 본다
-    setTimeout(() => { if (!conn._opened && ui.peer === peer && !peer.destroyed && !ui.conn) { try { conn.close(); } catch (e) {} ui.peerStatus = "waiting"; render(); startPeer(true); } }, 10000);
+    setTimeout(() => { if (!conn._opened && ui.peer === peer && !peer.destroyed && !ui.conn) { try { conn.close(); } catch (e) {} ui.peerStatus = "waiting"; render(); startPeer(true); } }, 8000);
   }
   function attach(conn) {
     conn.on("open", () => {
       conn._opened = true;
       if (ui.conn && ui.conn !== conn) { try { ui.conn.close(); } catch (e) {} }
-      ui.conn = conn; ui.peerStatus = "connected"; ui.error = ""; ui.lastRx = Date.now();
+      ui.conn = conn; ui.peerStatus = "connected"; ui.error = ""; ui.lastRx = Date.now(); ui.peerAway = false; ui.tries = 0;
       send({ t: "hello", id: ui.myId, name: ui.name, state: ui.online, seq: seqOf() });
       if (!ui.isHost) flushPending();
       render();
     });
-    conn.on("data", m => { if (window.__duoStall) return; if (ui.conn === conn) { ui.lastRx = Date.now(); onMsg(m); } });
+    conn.on("data", m => {
+      if (window.__duoStall || ui.conn !== conn) return;
+      ui.lastRx = Date.now();
+      if (m && m.t === "bye") {                                     // 상대가 페이지를 닫았다 → 기다리지 않고 바로 정리
+        const wasGuest = !ui.isHost; conn.close(); gone();
+        if (wasGuest) retry(400, true);                             // 방장이 나갔다 → 내가 판을 이어받는다
+        return;
+      }
+      const away = !!(m && (m.t === "away" || m.away));
+      if (away !== ui.peerAway) { ui.peerAway = away; paintConn(); }
+      if (!away) onMsg(m);
+    });
     const gone = () => {
       if (ui.conn !== conn) return;
-      ui.conn = null; ui.peerStatus = ui.isHost ? "waiting" : "lost"; render();
+      ui.conn = null; ui.peerAway = false; ui.peerStatus = ui.isHost ? "waiting" : "lost"; render();
       if (!ui.isHost) retry(1200, false);                     // 다시 붙어 보고, 상대가 없으면 내가 자리를 잡는다
     };
     conn.on("close", gone); conn.on("error", gone);
@@ -237,6 +264,7 @@ window.Duo = function (game) {
   const DROP = +(params.get("droptest") || 0);          // 시험용: 메시지를 일부러 이 비율만큼 버린다
   function send(m) {
     if ((DROP && Math.random() < DROP) || window.__duoStall) return false;
+    if (document.hidden) m = Object.assign({ away: 1 }, m);      // 다른 앱에 가 있는 동안 보내는 건 "자리 비움" 표시를 달아요
     try { if (ui.conn && ui.conn.open) { ui.conn.send(m); return true; } } catch (e) {}
     return false;
   }
@@ -311,33 +339,76 @@ window.Duo = function (game) {
     if (ui.isHost && m.t === "need") sendSync();
   }
 
-  /* 2초마다: 서로 상태 번호 확인, 못 받은 행동 다시 보내기, 응답이 끊긴 연결 정리 */
+  /* 1.5초마다: 서로 상태 번호 확인, 못 받은 행동 다시 보내기, 응답이 끊긴 연결 정리, 중개 서버 연결 점검 */
+  const DEAD = 7000;
+  function dropConn() { const c = ui.conn; if (!c) return; try { c.close(); } catch (e) {} if (c._gone) c._gone(); }
   setInterval(() => {
-    if (!ui.room || !ui.conn) return;
-    if (Date.now() - (ui.lastRx || 0) > 9000) { const c = ui.conn; try { c.close(); } catch (e) {} if (c._gone) c._gone(); return; }
+    if (!ui.room) return;
+    const peer = ui.peer, now = Date.now();
+    if (peer && !retryTimer) {
+      if (peer.destroyed) { if (!ui.conn) startPeer(true); }
+      else if (peer.disconnected && !peer._dead && now - (ui.reT || 0) > 4000) { ui.reT = now; try { peer.reconnect(); } catch (e) {} }
+      // 손님인데 오래 붙지 못하면 처음부터 다시 (자리가 비었으면 내가 차지)
+      else if (!ui.conn && !ui.isHost && now - (ui.peerT || 0) > 15000) startPeer(true);
+    }
+    if (!ui.conn) { paintConn(); return; }
+    if (now - (ui.lastRx || 0) > DEAD) { dropConn(); return; }
     if (ui.isHost) send({ t: "ping", seq: seqOf(), ack: ui.lastAid || 0 });
     else {
       if (!ui.online || mySeat(ui.online) < 0) send({ t: "hello", id: ui.myId, name: ui.name, state: ui.online, seq: seqOf() });   // 아직 자리에 안 들어갔으면 인사 다시
       flushPending(); send({ t: "ping", seq: seqOf() });
     }
-  }, 2000);
+    paintConn();
+  }, 1500);
   // 다른 앱(카톡 등)에 갔다가 돌아오거나, 사파리가 뒤로 가기로 페이지를 되살리면 바로 다시 맞춘다
   const resume = () => {
-    if (document.hidden || !ui.room) return;
-    if (!ui.conn) { if (!ui.isHost) startPeer(); return; }
-    if (Date.now() - (ui.lastRx || 0) > 5000) { const c = ui.conn; try { c.close(); } catch (e) {} if (c._gone) c._gone(); if (!ui.isHost) startPeer(); return; }
+    if (!ui.room) return;
+    if (document.hidden) { send({ t: "away" }); return; }      // 잠깐 자리 비움을 상대에게 알려요
+    if (!ui.conn) { if (!retryTimer) startPeer(ui.isHost ? true : false); return; }
+    if (Date.now() - (ui.lastRx || 0) > 5000) { dropConn(); if (!ui.isHost) startPeer(false); return; }
     if (ui.isHost) sendSync(); else { flushPending(); send({ t: "ping", seq: seqOf() }); }
   };
   document.addEventListener("visibilitychange", resume);
   window.addEventListener("pageshow", e => { if (e.persisted && ui.room) { ui.lastRx = 0; resume(); } });
+  window.addEventListener("pagehide", () => { send({ t: "bye" }); });
+  // 연결 버튼의 "다시 연결하기": 처음부터 자리 잡기를 다시 해요
+  function reconnectNow() {
+    if (!ui.room) return;
+    dropConn();
+    ui.peerStatus = "opening"; ui.tries = 0; render();
+    killPeer(ui.peer);
+    ui.peer = null;
+    retry(600, true);
+  }
 
   /* ───── rendering ───── */
+  function connInfo() {
+    const st = ui.peerStatus, ago = ui.conn ? Date.now() - (ui.lastRx || 0) : 0;
+    if (st === "connected" && ui.conn) {
+      if (ui.peerAway) return { cls: "away", txt: "상대 자리 비움", why: "상대가 다른 앱이나 홈 화면에 가 있어요. 돌아오면 바로 이어져요." };
+      if (ago > 3500) return { cls: "slow", txt: "응답 느림", why: `상대 폰에서 ${Math.round(ago / 1000)}초째 소식이 없어요. 7초가 넘으면 다시 연결해요.` };
+      return { cls: "ok", txt: "연결됨", why: "상대와 잘 연결돼 있어요." };
+    }
+    if (st === "waiting") return { cls: "", txt: "상대 기다리는 중", why: "이 폰이 판을 열어 두고 상대를 기다려요. 상대 폰에서 이 게임을 열면 자동으로 붙어요." };
+    if (st === "connecting") return { cls: "", txt: ui.tries > 1 ? `연결 중 (${ui.tries})` : "연결 중", why: "상대 폰이 연 판에 붙는 중이에요." };
+    if (st === "lost") return { cls: "bad", txt: "다시 연결 중", why: "연결이 끊겨서 다시 붙는 중이에요." };
+    if (st === "full") return { cls: "bad", txt: "방이 가득 찼어요", why: "상대 폰에서 다른 사람과 하던 판이 진행 중이에요." };
+    if (st === "error") return { cls: "bad", txt: "연결 안 됨", why: ui.error || "연결할 수 없어요." };
+    return { cls: "", txt: "준비 중", why: "연결 서버에 접속하는 중이에요." };
+  }
   const connPill = () => {
     if (!ui.room) return "";
-    const st = ui.peerStatus;
-    const txt = st === "connected" ? "연결됨" : st === "waiting" ? "상대 기다리는 중" : st === "nohost" ? "방장 찾는 중" : st === "lost" ? "다시 연결 중" : st === "full" ? "방이 가득 찼어요" : st === "error" ? "연결 안 됨" : "연결 준비 중";
-    return `<span class="duo-conn ${st === "connected" ? "ok" : ""}" role="status">${txt}</span>`;
+    const c = connInfo();
+    return `<button class="duo-conn ${c.cls}" data-duo="conn" role="status" aria-label="연결 상태: ${c.txt}">${c.txt}</button>`;
   };
+  // 1.5초 점검 때 연결 표시만 살짝 고쳐요 (화면 전체를 다시 그리지 않음)
+  function paintConn() {
+    if (ui.inSolo) return;
+    const el = $(".duo-conn[data-duo=conn]"); if (!el) return;
+    const c = connInfo();
+    if (el.textContent !== c.txt) { el.textContent = c.txt; el.className = "duo-conn " + c.cls; el.setAttribute("aria-label", "연결 상태: " + c.txt); }
+    if (ui.sheet && ui.sheet.kind === "conn") { const w = $("#duo-conn-why"); if (w && w.textContent !== c.why) w.textContent = c.why; }
+  }
   const hero = () => `<a class="duo-pill" href="../" style="align-self:flex-start">← 다른 게임</a>
     <div class="duo-hero"><div class="mark">${game.mark}</div><h1>${esc(game.title)}</h1><p>${game.tagline}</p></div>`;
   const rulesBtn = `<button class="duo-btn" data-duo="rules"><b>규칙 보기</b><span>처음이라면 먼저 읽어 보세요</span></button>`;
@@ -380,8 +451,23 @@ window.Duo = function (game) {
         ${action}
         ${ui.error ? `<p class="duo-err">${esc(ui.error)}</p>` : ""}
       </div>
+      ${game.solo ? `<div class="duo-row">${ui.solo && ui.solo.game && ui.solo.game.phase !== "over" ? `<button class="duo-btn" data-duo="solo-resume"><b>혼자 연습 이어서</b><span>하던 연습 판으로</span></button>` : ""}
+        <button class="duo-btn" data-duo="solo"><b>혼자 연습</b><span>위 설정으로 새 연습 판 · 상대가 오면 같이 할 수 있어요</span></button></div>` : ""}
       <div class="duo-row">${rulesBtn}
         <button class="duo-btn" data-duo="rename"><b>이름 바꾸기</b><span>지금: ${esc(ui.name)}</span></button></div></div>`;
+  }
+  /* 혼자 연습: 이 폰에서만 도는 1인 판. 온라인 연결은 뒤에서 그대로 유지돼요. */
+  function soloCommand(cmd) {
+    ui.sheet = null;
+    if (cmd === "start" || cmd === "again") {
+      const opts = Object.assign({}, (ui.online && ui.online.opts) || ui.opts);
+      const prev = ui.solo;
+      ui.solo = { v: 1, status: "playing", solo: true, players: [{ id: ui.myId, name: ui.name }], opts, seq: ((prev && prev.seq) || 0) + 1, game: null };
+      try { ui.solo.game = game.setup(ui.solo.players, opts, { prev: null, solo: true }); } catch (e) { console.error(e); ui.solo = null; toast("연습 판을 만들지 못했어요"); render(); return; }
+      store.set(K("solo"), ui.solo); ui.g = {}; ui.inSolo = true;
+      afterChange(prev, ui.solo);
+    } else if (cmd === "resume") { if (ui.solo && ui.solo.game) { ui.inSolo = true; ui.g = {}; render(); } }
+    else if (cmd === "lobby") { ui.inSolo = false; ui.g = {}; render(); }
   }
   function ctxFor(s) {
     const me = mySeat(s);
@@ -390,7 +476,7 @@ window.Duo = function (game) {
       ui: ui.g, act, esc, toast, josa,
       rerender: render,
       flush() { if (renderPending) render(); },
-      connected: ui.peerStatus === "connected", isHost: ui.isHost,
+      connected: ui.peerStatus === "connected", isHost: ui.isHost, solo: ui.inSolo,
       sheet(html, opts) { ui.sheet = Object.assign({ kind: "game", html }, opts || {}); render(); },
       closeSheet() { ui.sheet = null; render(); },
     };
@@ -398,7 +484,8 @@ window.Duo = function (game) {
   function tableHTML(s, ctx) {
     const log = s.game && Array.isArray(s.game.log);
     return `<div class="duo-bar"><a class="duo-pill" href="../" aria-label="게임 목록">←</a><span class="duo-title">${esc(game.title)}</span><span class="sp"></span>
-        ${connPill()}${log ? `<button class="duo-pill" data-duo="log">기록</button>` : ""}<button class="duo-pill" data-duo="rules">규칙</button><button class="duo-pill" data-duo="menu" aria-label="메뉴">⋯</button></div>
+        ${ui.inSolo ? `<span class="duo-conn solo">혼자 연습</span>` : connPill()}${log ? `<button class="duo-pill" data-duo="log">기록</button>` : ""}<button class="duo-pill" data-duo="rules">규칙</button><button class="duo-pill" data-duo="menu" aria-label="메뉴">⋯</button></div>
+      ${ui.inSolo && ui.online && ui.online.status === "playing" && mySeat(ui.online) >= 0 ? `<button class="duo-banner" data-duo="solo-exit">상대와 하는 판이 열려 있어요 — 그쪽으로 가기</button>` : ""}
       <main id="duo-game">${game.render(ctx)}</main>
       ${ctx.me < 0 ? `<p class="duo-wait">상대 폰에서 다른 사람과 하던 판이라 구경만 하고 있어요.</p>
         <div class="duo-row"><button class="duo-btn warn" data-duo="reset" data-key="reset"><b>${ui.armed === "reset" ? "정말 그 판을 끝낼까요? 한 번 더 누르기" : "그 판 끝내고 둘이 새로 하기"}</b><span>진행 중이던 판은 사라져요</span></button></div>` : ""}`;
@@ -425,6 +512,14 @@ window.Duo = function (game) {
     const res = ctx && game.result ? game.result(s.game, ctx) : null;
     if (res && (!sh || sh.kind === "menu")) {
       const canAct = ctx.me >= 0;
+      if (ui.inSolo) {
+        h += `<div class="duo-scrim center"><div class="duo-sheet duo-result" role="dialog" aria-modal="true" aria-label="연습 결과">
+        <div class="big">${res.title}</div>${res.html || ""}
+        <div class="duo-row"><button class="duo-btn primary" data-duo="again"><b>새 연습 판</b><span>같은 설정으로 다시</span></button>
+        <button class="duo-btn" data-duo="lobby"><b>처음 화면</b><span>설정을 바꾸거나 상대와 하기</span></button></div>
+        <button class="duo-pill duo-close" data-duo="peek" style="align-self:center">판 다시 보기</button></div></div>`;
+        return h + (sh ? sheetHTML(sh, s) : "");
+      }
       h += `<div class="duo-scrim center"><div class="duo-sheet duo-result" role="dialog" aria-modal="true" aria-label="게임 결과">
         <div class="big">${res.title}</div>${res.html || ""}
         ${canAct ? `<div class="duo-row"><button class="duo-btn primary" data-duo="again"><b>한 판 더</b><span>같은 둘이서 바로 다시</span></button>
@@ -442,12 +537,19 @@ window.Duo = function (game) {
     if (sh.kind === "rules") return wrapSheet(`<h2>${esc(game.title)} 규칙</h2>${game.rules}`, "규칙");
     if (sh.kind === "log") return wrapSheet(`<h2>지금까지의 기록</h2><div class="duo-log">${((s && s.game && s.game.log) || []).slice().reverse().map(t => `<div>${esc(t)}</div>`).join("") || "<div>아직 기록이 없어요.</div>"}</div>`, "기록");
     if (sh.kind === "peek") return "";
+    if (sh.kind === "conn") {
+      const c = connInfo();
+      return wrapSheet(`<h2>연결 상태 — ${esc(c.txt)}</h2><p id="duo-conn-why">${esc(c.why)}</p>
+        <p class="duo-note">이 폰: ${ui.isHost ? "판을 연 쪽 (방장)" : "상대가 연 판에 붙은 쪽"}. 하던 판은 두 폰에 모두 저장돼 있어서 다시 연결해도 사라지지 않아요.</p>
+        <div class="duo-row"><button class="duo-btn primary" data-duo="reconnect"><b>다시 연결하기</b><span>표시가 이상하거나 오래 안 붙으면 눌러 보세요</span></button></div>
+        <p class="duo-note">그래도 안 되면 두 폰 모두 와이파이나 데이터가 켜져 있는지 확인하고, 두 폰에서 이 페이지를 새로고침해 주세요.</p>`, "연결 상태");
+    }
     if (sh.kind === "game") return wrapSheet(sh.html, sh.label || "선택", sh.center);
     if (sh.kind === "menu") {
       const k = ui.armed;
       return wrapSheet(`<h2>메뉴</h2><div class="duo-row" style="flex-direction:column">
         <button class="duo-btn warn" data-duo="again" data-key="again"><b>${k === "again" ? "정말 새로 시작할까요? 한 번 더 누르기" : "이 판 그만두고 새 게임"}</b><span>같은 두 사람으로 처음부터</span></button>
-        <button class="duo-btn warn" data-duo="lobby" data-key="lobby"><b>${k === "lobby" ? "정말 나갈까요? 한 번 더 누르기" : "처음 화면으로"}</b><span>설정 화면으로 (상대도 함께 이동)</span></button>
+        <button class="duo-btn warn" data-duo="lobby" data-key="lobby"><b>${k === "lobby" ? "정말 나갈까요? 한 번 더 누르기" : "처음 화면으로"}</b><span>${ui.inSolo ? "연습 판은 저장돼요. 나중에 이어서 할 수 있어요" : "설정 화면으로 (상대도 함께 이동)"}</span></button>
       </div>`, "메뉴");
     }
     return "";
@@ -491,6 +593,11 @@ window.Duo = function (game) {
       case "start": command("start"); break;
       case "again": ui.sheet = null; command("again"); break;
       case "lobby": ui.sheet = null; command("lobby"); break;
+      case "solo": soloCommand("start"); break;
+      case "solo-resume": soloCommand("resume"); break;
+      case "solo-exit": soloCommand("lobby"); break;
+      case "conn": ui.sheet = { kind: "conn" }; render(); break;
+      case "reconnect": ui.sheet = null; reconnectNow(); break;
     }
   });
   document.addEventListener("change", e => {

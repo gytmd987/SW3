@@ -197,7 +197,8 @@ function setup(n, rnd, opts) {
   if (opts.mode === "nightmare") { perm = [...Array(n).keys()]; for (let i = n - 1; i > 0; i--) { const j = rnd(i + 1); [perm[i], perm[j]] = [perm[j], perm[i]]; } }
   return {
     n, mode: opts.mode || "classic", hard: !!opts.hard, slots: pz.slots, rules: pz.rules, perm, answer: pz.answer, round: 1, phase: "play",
-    p: [0, 1].map(() => ({ tests: [], done: false, guess: null, out: false })),
+    solo: !!opts.solo,
+    p: (opts.solo ? [0] : [0, 1]).map(() => ({ tests: [], done: false, guess: null, out: false, miss: 0 })),
     winner: null, log: [],
   };
 }
@@ -218,7 +219,7 @@ function apply(g, seat, a, N) {
   if (a.type === "end") {
     if (a.guess != null && !okCode(a.guess)) return null;
     me.done = true; me.guess = a.guess ? a.guess.slice() : null;
-    const live = [0, 1].filter(s => !g.p[s].out);
+    const live = g.p.map((_, s) => s).filter(s => !g.p[s].out);
     if (live.every(s => g.p[s].done)) resolve(g, N);
     return g;
   }
@@ -226,8 +227,9 @@ function apply(g, seat, a, N) {
 }
 function resolve(g, N) {
   const right = [], wrong = [];
-  [0, 1].forEach(s => { const pl = g.p[s]; if (pl.out || !pl.guess) return; (sameCode(pl.guess, g.answer) ? right : wrong).push(s); });
-  wrong.forEach(s => { g.p[s].out = true; g.log.push(`${g.round}라운드: ${N[s]} 님의 정답 도전 ${g.p[s].guess.join("")} — 틀렸어요`); });
+  g.p.forEach((pl, s) => { if (pl.out || !pl.guess) return; (sameCode(pl.guess, g.answer) ? right : wrong).push(s); });
+  // 혼자 연습할 땐 틀려도 탈락하지 않고 계속 풀어요
+  wrong.forEach(s => { if (g.solo) g.p[s].miss = (g.p[s].miss || 0) + 1; else g.p[s].out = true; g.log.push(`${g.round}라운드: ${N[s]} 님의 정답 도전 ${g.p[s].guess.join("")} — 틀렸어요`); });
   right.forEach(s => g.log.push(`${g.round}라운드: ${N[s]} 님이 정답을 맞혔어요 (질문 ${used(g.p[s])}번)`));
   if (right.length) {
     g.phase = "over";
