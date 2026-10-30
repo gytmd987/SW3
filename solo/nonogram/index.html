@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>노노그램</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@700&family=Gowun+Dodum&family=IBM+Plex+Mono:wght@500;700&display=swap">
+<link rel="stylesheet" href="../solo.css?v=dev">
+<style>
+/* Layout: one sheet of graph paper — column clues stacked above, row clues to the left, the grid in the corner they share. */
+.ng-scroll { overflow: auto; max-width: 100%; border-radius: 12px; touch-action: pan-x pan-y; }
+.ng-scroll.zoom { max-height: 72dvh; }
+.ng { display: grid; width: max-content; margin: 0 auto; background: var(--paper); color: var(--ink); padding: 6px 8px 8px 6px; border-radius: 12px; font-family: var(--f-num); font-weight: 500; }
+.ng .clue { display: flex; gap: .38em; color: var(--ink); line-height: 1; }
+.ng .clue.done { color: var(--ink-soft); opacity: .45; }
+.ng .clue.hot { background: rgba(240, 180, 90, .32); }
+.ng .cc { flex-direction: column; justify-content: flex-end; align-items: center; padding-bottom: 4px; gap: .22em; border-radius: 4px 4px 0 0; }
+.ng .rc { justify-content: flex-end; align-items: center; padding-right: 5px; border-radius: 4px 0 0 4px; }
+.ng .cells { display: grid; touch-action: none; outline: 2px solid var(--grid-bold); }
+.ng .cell { box-sizing: border-box; border-right: 1px solid var(--grid); border-bottom: 1px solid var(--grid); position: relative; background: #fffdf6; }
+.ng .cell.r5 { border-right-color: var(--grid-bold); }
+.ng .cell.b5 { border-bottom-color: var(--grid-bold); }
+.ng .cell.last-c { border-right: none; }
+.ng .cell.last-r { border-bottom: none; }
+.ng .cell.hot { background: #fbefd2; }
+.ng .cell.v1 { background: var(--ink); }
+.ng .cell.v2::before, .ng .cell.v2::after { content: ""; position: absolute; left: 22%; right: 22%; top: 50%; height: 1.5px; background: #8a90a0; transform: rotate(45deg); }
+.ng .cell.v2::after { transform: rotate(-45deg); }
+.ng .cell.bad { box-shadow: inset 0 0 0 3px var(--danger); }
+.ng.finished .cell.v2::before, .ng.finished .cell.v2::after { display: none; }
+.ng.finished .cells { outline-color: var(--ok); }
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+<script src="../engines/rng.js?v=dev"></script>
+<script src="../engines/nonogram.js?v=dev"></script>
+<script src="../solo.js?v=dev"></script>
+<script>
+"use strict";
+const { el } = Solo;
+Solo.init({
+  game: "nonogram",
+  title: "노노그램",
+  intro: "숫자 힌트만 보고 칸을 칠해 숨은 그림을 찾아요. 어려움부터 시작해요.",
+  sizes: { hard: "15×15", extreme: "20×20", nightmare: "20×20 · 한 단계 더 깊은 추론" },
+  rules: `<p>줄마다 붙은 숫자는 그 줄에서 <b>연달아 칠해진 칸 덩어리의 길이</b>를 순서대로 적은 거예요.</p>
+    <ul><li>"3 1"이면 3칸 덩어리 하나, 띄고, 1칸 덩어리 하나가 그 순서로 있어요.</li>
+    <li>덩어리 사이에는 적어도 한 칸이 비어 있어요.</li>
+    <li>가로줄·세로줄 숫자를 모두 맞추면 완성이에요.</li></ul>
+    <p><b>칠하기</b>와 <b>✕ 표시</b>를 골라 칸을 눌러요. 끌면 한 줄로 이어서 칠해져요. ✕는 비어 있다고 확신하는 칸에 메모하는 용도예요.</p>
+    <p><b>악몽</b>은 줄 하나씩만 봐서는 더 진행이 안 되는 순간이 와요. 그럴 땐 "이 칸을 칠하면 어딘가에서 모순이 생긴다"를 따져 봐야 풀려요.</p>`,
+  mount,
+});
+
+function mount(p, save, ctx) {
+  const { w, h } = p, N = w * h;
+  let state = save.state && save.state.length === N ? save.state.slice() : new Array(N).fill(0);   // 0 blank, 1 filled, 2 ✕
+  const undo = [], redo = [];
+  let tool = 1, zoom = false;
+
+  // tools
+  const bFill = el(`<button class="tool" aria-pressed="true" title="칠하기">■ 칠하기</button>`);
+  const bCross = el(`<button class="tool" aria-pressed="false" title="✕ 표시">✕ 표시</button>`);
+  const bUndo = el(`<button class="tool icon" title="되돌리기" aria-label="되돌리기">↶</button>`);
+  const bRedo = el(`<button class="tool icon" title="다시 하기" aria-label="다시 하기">↷</button>`);
+  const bZoom = el(`<button class="tool" aria-pressed="false" title="크게 보기">크게</button>`);
+  const bClear = el(`<button class="tool" title="모두 지우기">지우기</button>`);
+  const setTool = t => { tool = t; bFill.setAttribute("aria-pressed", String(t === 1)); bCross.setAttribute("aria-pressed", String(t === 2)); };
+  bFill.onclick = () => setTool(1); bCross.onclick = () => setTool(2);
+  bUndo.onclick = () => step(undo, redo); bRedo.onclick = () => step(redo, undo);
+  bZoom.onclick = () => { zoom = !zoom; bZoom.setAttribute("aria-pressed", String(zoom)); layout(); };
+  bClear.onclick = async () => {
+    if (ctx.done()) return;
+    if (!await ctx.sheet("모두 지울까요?", "<p>칠한 칸과 ✕를 전부 지워요. 되돌리기로 다시 살릴 수 있어요.</p>", [{ label: "취소" }, { label: "지우기", cls: "danger", value: true }])) return;
+    const ch = []; state.forEach((v, i) => { if (v) ch.push([i, v, 0]); });
+    if (ch.length) commit(ch);
+  };
+  ctx.tools.append(bFill, bCross, el(`<span class="sp"></span>`), bUndo, bRedo, bZoom);
+  ctx.foot.prepend(bClear); bClear.className = "pill";
+
+  // board
+  const scroll = el(`<div class="ng-scroll"></div>`), grid = el(`<div class="ng"></div>`), cells = el(`<div class="cells"></div>`);
+  const colClues = p.cols.map(c => el(`<div class="clue cc">${c.map(x => `<span>${x}</span>`).join("")}</div>`));
+  const rowClues = p.rows.map(c => el(`<div class="clue rc">${c.map(x => `<span>${x}</span>`).join("")}</div>`));
+  const cellEls = [];
+  for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) {
+    const d = el(`<div class="cell"></div>`);
+    d.dataset.i = r * w + c;
+    if ((c + 1) % 5 === 0) d.classList.add("r5");
+    if ((r + 1) % 5 === 0) d.classList.add("b5");
+    if (c === w - 1) d.classList.add("last-c");
+    if (r === h - 1) d.classList.add("last-r");
+    cellEls.push(d); cells.append(d);
+  }
+  // outer grid: corner | column clues on top; row clues | cells below
+  const colStrip = el(`<div style="display:flex;grid-column:2;grid-row:1"></div>`);
+  colStrip.append(...colClues);
+  rowClues.forEach((rc, r) => { rc.style.gridColumn = "1"; rc.style.gridRow = String(r + 2); });
+  cells.style.gridColumn = "2"; cells.style.gridRow = `2 / span ${h}`;
+  grid.append(el(`<div style="grid-column:1;grid-row:1"></div>`), colStrip, ...rowClues, cells);
+  scroll.append(grid); ctx.board.append(scroll);
+
+  function layout() {
+    const avail = Math.min(ctx.board.clientWidth || 340, 640);
+    const maxRow = Math.max(...p.rows.map(c => c.reduce((a, x) => a + String(x).length + .62, 0)));
+    const maxCol = Math.max(...p.cols.map(c => c.length));
+    let s = zoom ? 30 : 34, font;
+    for (; s > 13; s--) {
+      font = Math.max(9, Math.min(15, s * .6));
+      if (zoom || maxRow * font * .62 + 8 + w * s + 16 <= avail) break;
+    }
+    font = Math.max(9, Math.min(15, s * .6));
+    const rowW = Math.ceil(maxRow * font * .62 + 8), colH = Math.ceil(maxCol * font * 1.22 + 6);
+    grid.style.fontSize = font + "px";
+    grid.style.gridTemplateColumns = `${rowW}px ${w * s}px`;
+    grid.style.gridTemplateRows = `${colH}px repeat(${h}, ${s}px)`;
+    colClues.forEach(cc => { cc.style.width = s + "px"; });
+    cells.style.gridTemplateColumns = `repeat(${w}, ${s}px)`; cells.style.gridTemplateRows = `repeat(${h}, ${s}px)`;
+    scroll.classList.toggle("zoom", zoom);
+  }
+  layout();
+  addEventListener("resize", layout);
+
+  function paint(i) {
+    const d = cellEls[i];
+    d.classList.toggle("v1", state[i] === 1); d.classList.toggle("v2", state[i] === 2);
+  }
+  function lineDone(vals, clue) {
+    const got = Nonogram.cluesOf(vals.map(v => v === 1 ? 1 : 0));
+    return got.length === clue.length && got.every((x, i) => x === clue[i]);
+  }
+  function paintClues(rows, cols) {
+    for (const r of rows) rowClues[r].classList.toggle("done", lineDone(state.slice(r * w, r * w + w), p.rows[r]));
+    for (const c of cols) { const v = []; for (let r = 0; r < h; r++) v.push(state[r * w + c]); colClues[c].classList.toggle("done", lineDone(v, p.cols[c])); }
+  }
+  const all = n => [...Array(n).keys()];
+  function paintAll() { for (let i = 0; i < N; i++) paint(i); paintClues(all(h), all(w)); grid.classList.toggle("finished", ctx.done()); updateButtons(); }
+  function updateButtons() { bUndo.disabled = !undo.length || ctx.done(); bRedo.disabled = !redo.length || ctx.done(); }
+
+  // ch: [[cell, before, after], ...]
+  function commit(ch) {
+    for (const [i, , a] of ch) { state[i] = a; paint(i); }
+    undo.push(ch); redo.length = 0;
+    after(ch);
+  }
+  function step(from, to) {
+    const ch = from.pop(); if (!ch || ctx.done()) return;
+    const back = ch.map(([i, b, a]) => [i, a, b]);
+    for (const [i, , a] of back) { state[i] = a; paint(i); }
+    to.push(ch); after(back);
+  }
+  function after(ch) {
+    const rs = new Set(), cs = new Set();
+    for (const [i] of ch) { rs.add(Math.floor(i / w)); cs.add(i % w); }
+    paintClues(rs, cs); updateButtons();
+    ctx.save(state);
+    if (Nonogram.matches(p, state)) { grid.classList.add("finished"); ctx.solved(); updateButtons(); }
+  }
+
+  // strokes: press, drag along a row or column, release
+  let stroke = null;
+  const cellAt = (x, y) => { const t = document.elementFromPoint(x, y); return t && t.dataset && t.dataset.i !== undefined && cells.contains(t) ? +t.dataset.i : -1; };
+  function hot(i) {
+    grid.querySelectorAll(".hot").forEach(x => x.classList.remove("hot"));
+    if (i < 0) return;
+    const r = Math.floor(i / w), c = i % w;
+    rowClues[r].classList.add("hot"); colClues[c].classList.add("hot");
+  }
+  cells.addEventListener("pointerdown", e => {
+    if (ctx.done()) return;
+    const i = cellAt(e.clientX, e.clientY); if (i < 0) return;
+    e.preventDefault();
+    cells.setPointerCapture(e.pointerId);
+    const from = state[i], to = from === tool ? 0 : tool;
+    stroke = { start: i, from, to, axis: null, touched: new Map() };
+    extend(i); hot(i);
+  });
+  cells.addEventListener("pointermove", e => {
+    if (!stroke) return;
+    const i = cellAt(e.clientX, e.clientY); if (i < 0) return;
+    extend(i); hot(i);
+  });
+  const end = () => {
+    if (!stroke) return;
+    const ch = []; for (const [i, b] of stroke.touched) if (state[i] !== b) ch.push([i, b, state[i]]);
+    stroke = null; hot(-1);
+    if (ch.length) { for (const [i, b] of ch) state[i] = b; commit(ch); }
+  };
+  cells.addEventListener("pointerup", end); cells.addEventListener("pointercancel", end);
+  function extend(i) {
+    const s = stroke, r0 = Math.floor(s.start / w), c0 = s.start % w;
+    let r = Math.floor(i / w), c = i % w;
+    if (!s.axis && i !== s.start) s.axis = Math.abs(r - r0) >= Math.abs(c - c0) ? "col" : "row";
+    if (s.axis === "row") r = r0; else if (s.axis === "col") c = c0;
+    const line = new Set();
+    if (s.axis === "row") for (let x = Math.min(c, c0); x <= Math.max(c, c0); x++) line.add(r0 * w + x);
+    else for (let y = Math.min(r, r0); y <= Math.max(r, r0); y++) line.add(y * w + c0);
+    // cells that left the stroke go back to how they were
+    for (const [j, b] of s.touched) if (!line.has(j)) { state[j] = b; paint(j); s.touched.delete(j); }
+    for (const j of line) {
+      if (!s.touched.has(j)) { if (state[j] !== s.from) continue; s.touched.set(j, state[j]); }
+      state[j] = s.to; paint(j);
+    }
+  }
+
+  paintAll();
+  return {
+    reveal() { state = p.solution.map(v => v ? 1 : 2); paintAll(); grid.classList.add("finished"); ctx.save(state); },
+    check() {
+      const bad = [];
+      state.forEach((v, i) => { if ((v === 1 && !p.solution[i]) || (v === 2 && p.solution[i])) bad.push(i); });
+      bad.forEach(i => cellEls[i].classList.add("bad"));
+      setTimeout(() => bad.forEach(i => cellEls[i].classList.remove("bad")), 2500);
+      return bad.length;
+    },
+  };
+}
+</script>
+</body>
+</html>

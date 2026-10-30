@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>스타 배틀</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@700&family=Gowun+Dodum&family=IBM+Plex+Mono:wght@500;700&display=swap">
+<link rel="stylesheet" href="../solo.css?v=dev">
+<style>
+/* Layout: a square board of tinted regions with heavy borders between them; stars sit in the cells. */
+.sb-wrap { display: flex; justify-content: center; }
+.sb { display: grid; background: var(--paper); padding: 6px; border-radius: 12px; touch-action: none; }
+.sb .cell { position: relative; box-sizing: border-box; border: 0 solid var(--ink); border-right-width: 1px; border-bottom-width: 1px; border-color: rgba(29, 36, 51, .18); display: grid; place-items: center; color: var(--ink); }
+.sb .cell.wt { border-top: 3px solid var(--ink); }
+.sb .cell.wl { border-left: 3px solid var(--ink); }
+.sb .cell.wr { border-right: 3px solid var(--ink); }
+.sb .cell.wb { border-bottom: 3px solid var(--ink); }
+.sb .cell.v1::after { content: ""; width: calc(var(--s) * .16); height: calc(var(--s) * .16); border-radius: 50%; background: rgba(29, 36, 51, .55); }
+.sb .cell.v2::after { content: "★"; font-size: calc(var(--s) * .66); line-height: 1; color: var(--ink); }
+.sb .cell.clash.v2::after { color: var(--danger); }
+.sb .cell.bad { box-shadow: inset 0 0 0 3px var(--danger); }
+.sb.finished .cell.v2::after { color: #b77a12; }
+.sb.finished .cell.v1::after { opacity: .25; }
+.sb-count { display: flex; justify-content: center; gap: 14px; font-size: 13px; color: var(--muted); }
+.sb-count b { color: var(--fg); font-family: var(--f-num); }
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+<script src="../engines/rng.js?v=dev"></script>
+<script src="../engines/stars.js?v=dev"></script>
+<script src="../solo.js?v=dev"></script>
+<script>
+"use strict";
+const { el } = Solo;
+// tints for the regions (light, so the stars stay readable); neighbouring regions never share one
+const TINTS = ["#f5d6a1", "#c9def3", "#d3ebc8", "#f3c9d3", "#dfd0f2", "#c8e8e3", "#ece7d6"];
+Solo.init({
+  game: "stars",
+  title: "스타 배틀",
+  intro: "가로줄, 세로줄, 굵은 선으로 나뉜 구역마다 별을 정해진 개수만큼 놓아요. 별끼리는 닿으면 안 돼요.",
+  sizes: { hard: "9×9 · 별 2개씩", extreme: "10×10 · 별 2개씩", nightmare: "10×10 · 별 2개씩 · 막다른 길투성이" },
+  rules: `<p>판 위에 별을 놓아요.</p>
+    <ul><li>모든 <b>가로줄</b>, 모든 <b>세로줄</b>, 굵은 선으로 둘러싼 모든 <b>구역</b>에 별이 정확히 <b>2개</b>씩 있어야 해요.</li>
+    <li>별끼리는 <b>가로·세로·대각선</b>으로도 붙어 있으면 안 돼요.</li></ul>
+    <p><b>★ 별</b> 도구로 별을 놓고 빼요. <b>· 점</b> 도구는 "여긴 별이 없다"는 메모예요. 점 도구로 끌면 여러 칸에 한 번에 찍혀요.</p>
+    <p>규칙을 어긴 별은 빨갛게 보여요. 어려운 판일수록 한 구역 안에서 별이 갈 수 있는 자리를 여러 구역끼리 맞대어 따져 봐야 풀려요.</p>`,
+  mount,
+});
+
+// greedy colouring of the region map, most-connected regions first
+function colour(regions, n) {
+  const near = Array.from({ length: n }, () => new Set());
+  for (let i = 0; i < n * n; i++) {
+    if (i % n < n - 1 && regions[i + 1] !== regions[i]) { near[regions[i]].add(regions[i + 1]); near[regions[i + 1]].add(regions[i]); }
+    if (i + n < n * n && regions[i + n] !== regions[i]) { near[regions[i]].add(regions[i + n]); near[regions[i + n]].add(regions[i]); }
+  }
+  const out = new Array(n).fill(-1), uses = new Array(TINTS.length).fill(0);
+  for (const r of [...Array(n).keys()].sort((a, b) => near[b].size - near[a].size)) {
+    const used = new Set([...near[r]].map(q => out[q]));
+    // the least-used tint no neighbour has, so all the tints get spread around
+    const free = [...TINTS.keys()].filter(t => !used.has(t)).sort((a, b) => uses[a] - uses[b] || a - b);
+    out[r] = free.length ? free[0] : 0; uses[out[r]]++;
+  }
+  return out;
+}
+
+function mount(p, save, ctx) {
+  const { n, k, regions } = p, N = n * n;
+  let state = save.state && save.state.length === N ? save.state.slice() : new Array(N).fill(0);   // 0 empty, 1 dot, 2 star
+  const undo = [], redo = [];
+  let tool = 2;
+
+  const bStar = el(`<button class="tool" aria-pressed="true">★ 별</button>`);
+  const bDot = el(`<button class="tool" aria-pressed="false">· 점</button>`);
+  const bUndo = el(`<button class="tool icon" title="되돌리기" aria-label="되돌리기">↶</button>`);
+  const bRedo = el(`<button class="tool icon" title="다시 하기" aria-label="다시 하기">↷</button>`);
+  const bClear = el(`<button class="pill">지우기</button>`);
+  const setTool = t => { tool = t; bStar.setAttribute("aria-pressed", String(t === 2)); bDot.setAttribute("aria-pressed", String(t === 1)); };
+  bStar.onclick = () => setTool(2); bDot.onclick = () => setTool(1);
+  bUndo.onclick = () => step(undo, redo); bRedo.onclick = () => step(redo, undo);
+  bClear.onclick = async () => {
+    if (ctx.done()) return;
+    if (!await ctx.sheet("모두 지울까요?", "<p>별과 점을 전부 지워요. 되돌리기로 다시 살릴 수 있어요.</p>", [{ label: "취소" }, { label: "지우기", cls: "danger", value: true }])) return;
+    const ch = []; state.forEach((v, i) => { if (v) ch.push([i, v, 0]); });
+    if (ch.length) commit(ch);
+  };
+  ctx.tools.append(bStar, bDot, el(`<span class="sp"></span>`), bUndo, bRedo);
+  ctx.foot.prepend(bClear);
+
+  const wrap = el(`<div class="sb-wrap"></div>`), board = el(`<div class="sb"></div>`);
+  const count = el(`<div class="sb-count"></div>`);
+  const tint = colour(regions, n), cellEls = [];
+  for (let i = 0; i < N; i++) {
+    const r = Math.floor(i / n), c = i % n, d = el(`<div class="cell"></div>`);
+    d.dataset.i = i;
+    d.style.background = TINTS[tint[regions[i]]];
+    if (r === 0 || regions[i - n] !== regions[i]) d.classList.add("wt");
+    if (c === 0 || regions[i - 1] !== regions[i]) d.classList.add("wl");
+    if (c === n - 1) d.classList.add("wr");
+    if (r === n - 1) d.classList.add("wb");
+    cellEls.push(d); board.append(d);
+  }
+  wrap.append(board); ctx.board.append(wrap, count);
+
+  function layout() {
+    const avail = Math.min(ctx.board.clientWidth || 340, 560);
+    const s = Math.max(26, Math.min(48, Math.floor((avail - 16) / n)));
+    board.style.setProperty("--s", s + "px");
+    board.style.gridTemplateColumns = `repeat(${n}, ${s}px)`; board.style.gridTemplateRows = `repeat(${n}, ${s}px)`;
+  }
+  layout(); addEventListener("resize", layout);
+
+  function clashes() {
+    const bad = new Set(), row = {}, col = {}, reg = {};
+    const add = (m, key, i) => { (m[key] = m[key] || []).push(i); };
+    for (let i = 0; i < N; i++) {
+      if (state[i] !== 2) continue;
+      const r = Math.floor(i / n), c = i % n;
+      add(row, r, i); add(col, c, i); add(reg, regions[i], i);
+      for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+        const rr = r + dr, cc = c + dc;
+        if ((dr || dc) && rr >= 0 && rr < n && cc >= 0 && cc < n && state[rr * n + cc] === 2) { bad.add(i); bad.add(rr * n + cc); }
+      }
+    }
+    for (const m of [row, col, reg]) for (const key in m) if (m[key].length > k) m[key].forEach(i => bad.add(i));
+    return bad;
+  }
+  function paintAll() {
+    const bad = clashes();
+    for (let i = 0; i < N; i++) {
+      const d = cellEls[i];
+      d.classList.toggle("v1", state[i] === 1); d.classList.toggle("v2", state[i] === 2); d.classList.toggle("clash", bad.has(i));
+    }
+    const stars = state.filter(v => v === 2).length;
+    count.innerHTML = `<span>놓은 별 <b>${stars}</b> / ${n * k}</span>`;
+    board.classList.toggle("finished", ctx.done());
+    bUndo.disabled = !undo.length || ctx.done(); bRedo.disabled = !redo.length || ctx.done();
+  }
+
+  function commit(ch) {
+    for (const [i, , a] of ch) state[i] = a;
+    undo.push(ch); redo.length = 0; after();
+  }
+  function step(from, to) {
+    const ch = from.pop(); if (!ch || ctx.done()) return;
+    for (const [i, b] of ch) state[i] = b;
+    to.push(ch.map(([i, b, a]) => [i, a, b])); after();
+  }
+  function after() {
+    paintAll(); ctx.save(state);
+    const stars = []; state.forEach((v, i) => { if (v === 2) stars.push(i); });
+    if (Stars.valid(p, stars)) { ctx.solved(); paintAll(); }
+  }
+
+  // tap to toggle; with the dot tool, drag to mark many cells
+  let stroke = null;
+  const cellAt = (x, y) => { const t = document.elementFromPoint(x, y); return t && t.dataset && t.dataset.i !== undefined && board.contains(t) ? +t.dataset.i : -1; };
+  board.addEventListener("pointerdown", e => {
+    if (ctx.done()) return;
+    const i = cellAt(e.clientX, e.clientY); if (i < 0) return;
+    e.preventDefault(); board.setPointerCapture(e.pointerId);
+    const from = state[i];
+    stroke = { from, to: from === tool ? 0 : tool, touched: new Map() };
+    touch(i);
+  });
+  board.addEventListener("pointermove", e => {
+    if (!stroke || tool !== 1) return;
+    const i = cellAt(e.clientX, e.clientY); if (i >= 0) touch(i);
+  });
+  const end = () => {
+    if (!stroke) return;
+    const ch = []; for (const [i, b] of stroke.touched) ch.push([i, b, state[i]]);
+    stroke = null;
+    if (ch.length) { for (const [i, b] of ch) state[i] = b; commit(ch); }
+  };
+  board.addEventListener("pointerup", end); board.addEventListener("pointercancel", end);
+  function touch(i) {
+    if (stroke.touched.has(i) || state[i] !== stroke.from) return;
+    stroke.touched.set(i, state[i]); state[i] = stroke.to;
+    cellEls[i].classList.toggle("v1", state[i] === 1); cellEls[i].classList.toggle("v2", state[i] === 2);
+  }
+
+  paintAll();
+  return {
+    reveal() { const sol = new Set(p.solution); state = state.map((_, i) => sol.has(i) ? 2 : 1); ctx.save(state); paintAll(); },
+    check() {
+      const sol = new Set(p.solution), bad = [];
+      state.forEach((v, i) => { if ((v === 2 && !sol.has(i)) || (v === 1 && sol.has(i))) bad.push(i); });
+      bad.forEach(i => cellEls[i].classList.add("bad"));
+      setTimeout(() => bad.forEach(i => cellEls[i].classList.remove("bad")), 2500);
+      return bad.length;
+    },
+  };
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>코드 추리</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@700&family=Gowun+Dodum&family=IBM+Plex+Mono:wght@500;700&display=swap">
+<link rel="stylesheet" href="../solo.css?v=dev">
+<style>
+/* Layout: a detective's log — the scored guesses as rows of tiles, a scratch grid of digits by position below, the answer slots and keypad at the bottom. */
+.cd-sec { border: 1px solid var(--line); border-radius: 14px; background: var(--panel); padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+.cd-sec h2 { margin: 0; font-size: 13px; font-weight: 400; color: var(--muted); display: flex; gap: 8px; align-items: center; }
+.cd-sec h2 .sp { flex: 1; }
+.cd-clue { display: flex; align-items: center; gap: 8px; padding: 3px 4px; border-radius: 10px; }
+.cd-clue .no { width: 24px; height: 34px; color: var(--muted); font-family: var(--f-num); font-size: 12px; flex: none; border: 1px dashed var(--line); border-radius: 6px; background: none; padding: 0; }
+.cd-clue .digits { display: flex; gap: 4px; }
+.cd-clue.off { opacity: .35; }
+.cd-clue.wrong { background: rgba(239, 107, 91, .16); box-shadow: inset 0 0 0 1px var(--danger); }
+.tile { width: 32px; height: 38px; border-radius: 7px; background: var(--paper); color: var(--ink); display: grid; place-items: center; font-family: var(--f-num); font-weight: 700; font-size: 20px; border: none; padding: 0; position: relative; }
+.tile.x { color: rgba(29, 36, 51, .3); }
+.tile.x::after { content: ""; position: absolute; left: 6px; right: 6px; top: 50%; height: 2px; background: var(--danger); transform: rotate(-35deg); }
+.tile.o { box-shadow: inset 0 0 0 3px var(--ok); }
+.score { display: flex; gap: 4px; margin-left: auto; font-family: var(--f-num); font-weight: 700; font-size: 15px; }
+.score span { min-width: 30px; text-align: center; padding: 3px 4px; border-radius: 8px; }
+.score .s { background: rgba(103, 201, 143, .18); color: var(--ok); }
+.score .b { background: rgba(240, 180, 90, .18); color: var(--accent); }
+.pad { display: grid; gap: 3px; }
+.pad .lbl { font-size: 11px; color: var(--muted); display: grid; place-items: center; }
+.pad button { border: 1px solid var(--line); background: transparent; border-radius: 6px; padding: 5px 0; font-family: var(--f-num); font-size: 14px; position: relative; min-width: 0; }
+.pad button.x { color: rgba(235, 230, 220, .25); }
+.pad button.x::after { content: ""; position: absolute; left: 25%; right: 25%; top: 50%; height: 1.5px; background: var(--danger); transform: rotate(-35deg); }
+.pad button.o { background: var(--ok); color: #0d2016; border-color: var(--ok); font-weight: 700; }
+.answer { display: flex; gap: 6px; justify-content: center; }
+.answer .tile { width: 46px; height: 54px; font-size: 28px; }
+.answer .tile.cur { box-shadow: 0 0 0 3px var(--accent); }
+.answer .tile.empty { background: rgba(243, 238, 226, .12); }
+.answer.shake { animation: shake .4s; }
+@keyframes shake { 20%, 60% { transform: translateX(-6px); } 40%, 80% { transform: translateX(6px); } }
+.keys { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.keys button { border: 1px solid var(--line); background: var(--panel); border-radius: 10px; padding: 10px 0; font-family: var(--f-num); font-size: 18px; }
+.keys .wide { grid-column: span 2; font-family: var(--f-body); font-size: 15px; }
+.keys .go { grid-column: span 3; }
+.keys .go { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 700; }
+.tries { text-align: center; font-size: 13px; color: var(--muted); }
+@media (prefers-reduced-motion: reduce) { .answer.shake { animation: none; } }
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+<script src="../engines/rng.js?v=dev"></script>
+<script src="../engines/code.js?v=dev"></script>
+<script src="../solo.js?v=dev"></script>
+<script>
+"use strict";
+const { el } = Solo;
+Solo.init({
+  game: "code",
+  title: "코드 추리",
+  intro: "누군가 숨긴 번호를 몇 번 찔러 본 기록만 남아 있어요. 그 기록만으로 번호를 알아내요.",
+  sizes: { hard: "4자리 · 숫자 안 겹침", extreme: "5자리 · 숫자 안 겹침", nightmare: "5자리 · 같은 숫자 또 나옴" },
+  rules: `<p>숨겨진 번호가 있어요. 위에 있는 줄은 누군가 번호를 짐작해 본 기록과 그 결과예요.</p>
+    <ul><li><b class="s" style="color:var(--ok)">S</b>(스트라이크): 숫자도 자리도 맞은 개수</li>
+    <li><b style="color:var(--accent)">B</b>(볼): 숫자는 번호 안에 있지만 자리가 다른 개수</li>
+    <li>어려움·극악은 번호 안에 같은 숫자가 두 번 나오지 않아요. 0으로 시작할 수도 있어요.</li>
+    <li><b>악몽</b>은 같은 숫자가 여러 번 나올 수 있어요. 이때 번호 속 숫자 하나는 한 번만 맞은 걸로 쳐요. 예를 들어 번호가 1 2 3 4 5이고 짐작이 1 1 9 9 9이면 1S 0B예요.</li></ul>
+    <p>기록 줄의 숫자를 누르면 ✕, 한 번 더 누르면 ○로 메모돼요. 줄 번호를 누르면 그 줄이 흐려져요. 아래 메모판에서는 자리마다 "이 숫자는 아님(✕)"과 "이 숫자 확정(○)"을 표시할 수 있어요.</p>
+    <p>답을 다 넣고 <b>확인</b>을 누르면 맞았는지 알려 줘요. 틀리면 그 답과 어긋나는 기록 줄이 빨갛게 표시돼요. 틀린 제출이 있으면 최고 기록에는 들어가지 않아요.</p>`,
+  helpWord: "틀린 제출",
+  mount,
+});
+
+function mount(p, save, ctx) {
+  const L = p.len;
+  const st = Object.assign({ marks: p.clues.map(() => new Array(L).fill(0)), off: p.clues.map(() => false), pad: Array.from({ length: L }, () => new Array(10).fill(0)), answer: new Array(L).fill(null), cur: 0, wrong: 0 }, save.state || {});
+  let wrongRows = new Set();
+  const persist = () => ctx.save(st);
+
+  // clue log
+  const log = el(`<section class="cd-sec"><h2>기록 <span class="sp"></span><span>${L}자리${p.repeat ? " · 같은 숫자 나올 수 있음" : ""}</span></h2></section>`);
+  const rows = p.clues.map((c, ci) => {
+    const row = el(`<div class="cd-clue"><button class="no" title="이 줄 흐리게">${ci + 1}</button><div class="digits"></div><div class="score"><span class="s">${c.s}S</span><span class="b">${c.b}B</span></div></div>`);
+    c.guess.forEach((d, i) => {
+      const t = el(`<button class="tile">${d}</button>`);
+      t.onclick = () => { if (ctx.done()) return; st.marks[ci][i] = (st.marks[ci][i] + 1) % 3; paint(); persist(); };
+      row.querySelector(".digits").append(t);
+    });
+    row.querySelector(".no").onclick = () => { st.off[ci] = !st.off[ci]; paint(); persist(); };
+    log.append(row);
+    return row;
+  });
+
+  // scratch pad: rows = digits 0–9, columns = positions
+  const padSec = el(`<section class="cd-sec"><h2>메모판 <span class="sp"></span><span>한 번 누르면 ✕, 두 번 누르면 ○</span></h2></section>`);
+  const pad = el(`<div class="pad" style="grid-template-columns: 28px repeat(${L}, minmax(0, 1fr))"></div>`);
+  pad.append(el(`<span></span>`));
+  for (let i = 0; i < L; i++) pad.append(el(`<span class="lbl">${i + 1}번째</span>`));
+  const padBtns = [];
+  for (let d = 0; d <= 9; d++) {
+    pad.append(el(`<span class="lbl">${d}</span>`));
+    for (let i = 0; i < L; i++) {
+      const b = el(`<button aria-label="${i + 1}번째 자리 ${d}">${d}</button>`);
+      b.onclick = () => { if (ctx.done()) return; st.pad[i][d] = (st.pad[i][d] + 1) % 3; paint(); persist(); };
+      (padBtns[i] = padBtns[i] || [])[d] = b; pad.append(b);
+    }
+  }
+  padSec.append(pad);
+
+  // answer
+  const ansSec = el(`<section class="cd-sec"><h2>내 답</h2></section>`);
+  const ans = el(`<div class="answer"></div>`);
+  const slots = [];
+  for (let i = 0; i < L; i++) {
+    const t = el(`<button class="tile"></button>`);
+    t.onclick = () => { st.cur = i; paint(); };
+    slots.push(t); ans.append(t);
+  }
+  const keys = el(`<div class="keys"></div>`);
+  for (let d = 0; d <= 9; d++) {
+    const b = el(`<button>${d}</button>`);
+    b.onclick = () => { if (ctx.done()) return; st.answer[st.cur] = d; st.cur = Math.min(L - 1, st.cur + 1); wrongRows.clear(); paint(); persist(); };
+    keys.append(b);
+  }
+  const back = el(`<button class="wide" aria-label="지우기">⌫ 지우기</button>`);
+  back.onclick = () => {
+    if (ctx.done()) return;
+    if (st.answer[st.cur] == null && st.cur > 0) st.cur--;
+    st.answer[st.cur] = null; wrongRows.clear(); paint(); persist();
+  };
+  const go = el(`<button class="wide go">확인</button>`);
+  go.onclick = submit;
+  keys.append(back, go);
+  const tries = el(`<div class="tries"></div>`);
+  ansSec.append(ans, keys, tries);
+  ctx.board.append(log, ansSec, padSec);
+
+  function submit() {
+    if (ctx.done()) return;
+    if (st.answer.some(v => v == null)) { ctx.toast(`${L}자리를 다 넣어 주세요`); return; }
+    if (st.answer.every((v, i) => v === p.answer[i])) { wrongRows.clear(); persist(); ctx.solved(); paint(); return; }
+    st.wrong++; ctx.penalty();
+    wrongRows = new Set(p.clues.map((c, i) => [c, i]).filter(([c]) => { const r = Code.score(c.guess, st.answer); return r.s !== c.s || r.b !== c.b; }).map(([, i]) => i));
+    ans.classList.remove("shake"); void ans.offsetWidth; ans.classList.add("shake");
+    ctx.toast(`아니에요 · 맞지 않는 기록 ${wrongRows.size}줄`);
+    paint(); persist();
+  }
+
+  function paint() {
+    rows.forEach((row, ci) => {
+      row.classList.toggle("off", st.off[ci]);
+      row.classList.toggle("wrong", wrongRows.has(ci));
+      row.querySelectorAll(".tile").forEach((t, i) => { t.classList.toggle("x", st.marks[ci][i] === 1); t.classList.toggle("o", st.marks[ci][i] === 2); });
+    });
+    for (let i = 0; i < L; i++) for (let d = 0; d <= 9; d++) { const b = padBtns[i][d]; b.classList.toggle("x", st.pad[i][d] === 1); b.classList.toggle("o", st.pad[i][d] === 2); }
+    slots.forEach((t, i) => {
+      t.textContent = st.answer[i] == null ? "" : st.answer[i];
+      t.classList.toggle("empty", st.answer[i] == null);
+      t.classList.toggle("cur", i === st.cur && !ctx.done());
+    });
+    keys.querySelectorAll("button").forEach(b => { b.disabled = ctx.done(); });
+    tries.textContent = st.wrong ? `틀린 제출 ${st.wrong}번` : "";
+  }
+  paint();
+  return {
+    reveal() { st.answer = p.answer.slice(); wrongRows.clear(); persist(); paint(); },
+  };
+}
+</script>
+</body>
+</html>
