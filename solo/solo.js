@@ -10,7 +10,7 @@
 "use strict";
 const LEVELS = ["hard", "extreme", "nightmare"];
 const LEVEL_NAME = { hard: "어려움", extreme: "극악", nightmare: "악몽" };
-const ENGINE = { nonogram: "Nonogram", stars: "Stars", code: "Code" };
+const ENGINE = { stars: "Stars", code: "Code" };
 const script = document.currentScript, BASE = new URL(".", script.src), VER = new URL(script.src).search;
 
 const store = {
