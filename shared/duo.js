@@ -15,8 +15,9 @@
  *   solo (optional)                           true = the lobby offers "혼자 연습"; setup gets env.solo,
  *                                             the game runs on this phone only with one player
  *
- * Online play: there is one table per game. Whoever opens the game first holds the table
- * (the "host"); the other page joins it automatically. The guest sends its moves as
+ * Online play: there is one table per game. Both pages post their messages to a "mailbox"
+ * (a topic on public MQTT servers) and read the other's from it, so no direct phone-to-phone
+ * connection is needed. Of the two pages, one is the "host". The guest sends its moves as
  * actions; the host applies them and sends back the whole state. Both keep the state in
  * localStorage, so if the host leaves, the other page takes the table over and the game
  * goes on.
@@ -141,42 +142,35 @@ window.Duo = function (game) {
     setState(n);
   }
 
-  /* ───── one table per game over PeerJS ─────
-     자리 이름은 하나가 아니라 SLOTS개(…-0, …-1, …)예요. 페이지는 비어 있는 가장 낮은 자리를 잡고,
-     자기보다 낮은 자리 중 이미 차 있던 곳에 전부 연결을 걸어 봐요. 받는 쪽(낮은 자리)이 방장,
-     건 쪽이 손님이 돼요.
-     예전처럼 이름이 하나뿐이면, 폰이 화면 꺼짐·앱 전환으로 깔끔하게 나가지 못했을 때 서버에
-     그 이름이 1분 넘게 "유령"으로 남아서 두 폰 모두 유령에게 연결을 걸며 기다리기만 했어요.
-     이제 유령은 자리 하나만 차지할 뿐이고, 진짜 상대는 다른 자리에서 바로 찾아요. */
-  const BASE = "gytmd987-sw3-" + game.id + (params.get("table") ? "-" + params.get("table").replace(/[^a-z0-9]/gi, "") : "");
-  const SLOTS = 5;
-  const slotId = k => BASE + "-" + k;
+  /* ───── one table per game: a mailbox on public MQTT servers ─────
+     폰끼리 직접 연결하지 않아요. 두 폰 모두 인터넷의 "우체통"(공용 MQTT 서버의 주제 하나)에
+     편지를 넣고, 거기서 상대 편지를 받아요. 통신사·와이파이가 들어오는 연결을 막아도 나가는
+     연결만 쓰니까 어디서든 돼요. 서버 하나가 느리거나 죽어도 되도록 같은 편지를 서버 세 곳에
+     동시에 넣고, 받는 쪽은 겹친 편지를 하나만 써요.
+     두 페이지가 서로를 알아보면 플레이어 번호(myId)가 작은 쪽이 방장이에요. 혼자면 내가 방장. */
+  const TOPIC = "gytmd987-sw3/v2/" + game.id + (params.get("table") ? "-" + params.get("table").replace(/[^a-z0-9]/gi, "") : "");
+  const BROKERS = params.get("mqtt") ? params.get("mqtt").split(",") : [
+    "wss://broker.emqx.io:8084/mqtt",
+    "wss://broker.hivemq.com:8884/mqtt",
+    "wss://test.mosquitto.org:8081/mqtt",
+  ];
   const ROOM = "main";
   const RK = k => K("room-" + ROOM + (k ? "-" + k : ""));
-  function peerOptions() {
-    const o = { debug: 0, config: { iceServers: [
-      { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] },
-      { urls: ["turn:openrelay.metered.ca:80", "turn:openrelay.metered.ca:443", "turn:openrelay.metered.ca:443?transport=tcp"], username: "openrelayproject", credential: "openrelayproject" },
-    ] } };
-    const ps = params.get("peerserver");
-    if (ps) { const [host, port] = ps.split(":"); Object.assign(o, { host, port: +port || 443, path: "/", secure: !/^localhost$|^127\./.test(host) }); }
-    return o;
-  }
-  function loadPeerLib() {
-    if (window.Peer) return Promise.resolve();
+  ui.inst = "i" + Date.now().toString(36) + rnd(1e9).toString(36);   // 이 페이지(탭) 한 번의 번호
+  ui.clients = []; ui.mailN = 0; ui.seen = new Set(); ui.seenQ = []; ui.byed = new Set();
+  function loadMqttLib() {
+    if (window.mqtt) return Promise.resolve();
     const tryLoad = src => new Promise((res, rej) => { const sc = document.createElement("script"); sc.src = src; sc.onload = res; sc.onerror = rej; document.head.appendChild(sc); });
-    return tryLoad("../vendor/peerjs.min.js").catch(() => tryLoad("https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"));
+    return tryLoad("../vendor/mqtt.min.js").catch(() => tryLoad("https://unpkg.com/mqtt@5.16.1/dist/mqtt.min.js"));
   }
-  let retryTimer = null;
-  const retry = ms => { clearTimeout(retryTimer); retryTimer = setTimeout(() => { retryTimer = null; if (ui.room) claim(); }, ms + rnd(500)); };
   function lobbyState() { return { v: 1, status: "lobby", players: [{ id: ui.myId, name: ui.name }], opts: Object.assign({}, ui.opts), seq: 1, game: null }; }
 
   async function join() {
     ui.room = ROOM; ui.error = "";
     ui.online = store.get(RK(), null);
     ui.peerStatus = "opening"; render();
-    try { await loadPeerLib(); } catch (e) { ui.peerStatus = "error"; ui.error = "연결 모듈을 불러오지 못했어요. 인터넷 연결을 확인하고 새로고침해 주세요."; render(); return; }
-    claim();
+    try { await loadMqttLib(); } catch (e) { ui.peerStatus = "error"; ui.error = "연결 모듈을 불러오지 못했어요. 인터넷 연결을 확인하고 새로고침해 주세요."; render(); return; }
+    openMail();
   }
   function becomeHost() {
     ui.isHost = true; ui.roled = true;
@@ -199,140 +193,90 @@ window.Duo = function (game) {
     ui.ep = store.get(RK("myep"), null);
     if (!ui.ep) { ui.ep = "e" + Date.now().toString(36) + rnd(1e6).toString(36); store.set(RK("myep"), ui.ep); store.set(RK("aid"), 0); ui.aid = 0; }
   }
-  // 버린 연결은 표시를 해 두고 닫는다. 표시가 없으면 닫는 도중 "disconnected"가 와서 다시 붙어 버리고,
-  // 그게 자리 이름을 계속 쥐고 있게 된다.
-  function killPeer(p) { if (!p) return; p._dead = true; try { p.destroy(); } catch (e) {} }
   const dbg = params.get("debug") ? (...a) => console.log("[duo]", ...a) : () => {};
-  window.__duoIds = () => ({ slot: ui.slot, below: ui.below, host: ui.isHost, status: ui.peerStatus, disc: ui.peer && ui.peer.disconnected, open: ui.peer && ui.peer.open, dials: (ui.dials || []).length });
+  const upCount = () => ui.clients.filter(c => c.connected).length;
+  window.__duoIds = () => ({ inst: ui.inst, host: ui.isHost, status: ui.peerStatus, up: upCount(), partner: ui.conn && ui.conn.inst });
 
-  // 모든 자리를 한꺼번에 잡아 보고, 잡힌 것 중 가장 낮은 자리 하나만 남긴다
-  function claim() {
-    if (!ui.room) return;
-    clearTimeout(retryTimer); retryTimer = null;
-    const gen = ui.gen = (ui.gen || 0) + 1;
-    killPeer(ui.peer); ui.peer = null;
-    (ui.dials || []).forEach(c => { try { c.close(); } catch (e) {} }); ui.dials = [];
-    if (ui.conn) dropConn();
-    ui.peerAway = false; ui.slot = -1; ui.below = [];
-    if (ui.peerStatus !== "error") { ui.peerStatus = "opening"; render(); }
-    dbg("claim");
-    const res = [], peers = [];
-    let chosen = false;
-    const settle = () => {
-      if (chosen || gen !== ui.gen) return;
-      for (let k = 0; k < SLOTS; k++) {
-        if (res[k] === undefined) return;                  // 아래 자리 결과를 아직 몰라요
-        if (res[k] === "open") {
-          chosen = true;
-          peers.forEach((p, j) => { if (j !== k) killPeer(p); });
-          usePeer(peers[k], k, res.map((r, j) => (j < k && r === "taken" ? j : -1)).filter(j => j >= 0));
-          return;
-        }
-      }
-      if (res.some(r => r === "taken")) { chosen = true; peers.forEach(killPeer); ui.peerStatus = "lost"; render(); retry(2500); return; }   // 자리가 다 찼어요
-      chosen = true; peers.forEach(killPeer); ui.peerStatus = "lost"; render(); retry(3000);   // 서버에 못 붙었어요
-    };
-    // 서버가 끝내 대답이 없으면 처음부터 다시
-    setTimeout(() => { if (!chosen && gen === ui.gen) { chosen = true; peers.forEach(killPeer); ui.peerStatus = "lost"; render(); retry(1000); } }, 12000);
-    for (let k = 0; k < SLOTS; k++) {
-      let p;
-      try { p = new Peer(slotId(k), peerOptions()); } catch (e) { ui.peerStatus = "error"; ui.error = "이 브라우저는 온라인 연결을 지원하지 않아요. 크롬이나 사파리로 열어 주세요."; render(); return; }
-      peers[k] = p;
-      p.on("open", () => {
-        if (p._used) { ui.discSince = 0; dbg("server again"); if (!ui.conn) dial(); return; }   // 쓰던 자리가 서버에 다시 붙었어요
-        if (gen !== ui.gen || chosen) { killPeer(p); return; }
-        res[k] = "open"; settle();
+  function openMail() {
+    closeMail();
+    BROKERS.forEach((url, i) => {
+      let c;
+      try { c = mqtt.connect(url, { clientId: "sw3" + ui.inst + "x" + i + rnd(1e4), clean: true, keepalive: 20, reconnectPeriod: 2500, connectTimeout: 8000, protocolVersion: 4 }); } catch (e) { return; }
+      ui.clients.push(c);
+      c.on("connect", () => {
+        dbg("up", url);
+        c.subscribe(TOPIC, { qos: 0 });
+        if (!ui.upT) ui.upT = Date.now();
+        if (ui.peerStatus === "opening" || ui.peerStatus === "lost") { ui.peerStatus = ui.conn ? "connected" : "waiting"; render(); }
+        pub({ t: "knock" });                                     // 누구 있어요?
       });
-      p.on("error", err => {
-        if (p._used) return;                                 // 고른 뒤의 오류는 usePeer가 처리
-        if (gen !== ui.gen) { killPeer(p); return; }
-        const t = err && err.type;
-        if (t === "browser-incompatible") { ui.peerStatus = "error"; ui.error = "이 브라우저는 온라인 연결을 지원하지 않아요. 크롬이나 사파리로 열어 주세요."; render(); return; }
-        if (res[k] === undefined) { res[k] = t === "unavailable-id" ? "taken" : "fail"; killPeer(p); settle(); }
-      });
+      c.on("message", (topic, payload) => { let env; try { env = JSON.parse(payload.toString()); } catch (e) { return; } onMail(env); });
+      c.on("close", () => { if (!upCount() && ui.room && ui.peerStatus !== "error") { ui.peerStatus = ui.conn ? ui.peerStatus : "lost"; paintConn(); } });
+      c.on("error", () => {});
+    });
+  }
+  function closeMail() { ui.clients.forEach(c => { try { c.end(true); } catch (e) {} }); ui.clients = []; }
+  // 편지 넣기: 연결된 서버 전부에. to가 있으면 그 페이지만 읽어요.
+  function pub(m, to) {
+    if (ui.leaving) return false;
+    const env = { s: ui.inst, u: ui.myId, n: ++ui.mailN, m };
+    if (to) env.to = to;
+    const data = JSON.stringify(env);
+    let ok = false;
+    ui.clients.forEach(c => { if (c.connected) { try { c.publish(TOPIC, data, { qos: 0 }); ok = true; } catch (e) {} } });
+    return ok;
+  }
+  const amHostWith = (uid, inst) => (ui.myId + ui.inst) < (uid + inst);
+  function onMail(env) {
+    if (!env || typeof env !== "object" || env.s === ui.inst || !env.m) return;
+    if (env.to && env.to !== ui.inst) return;
+    const key = env.s + ":" + env.n;                           // 서버 세 곳에서 같은 편지가 와요 → 한 번만
+    if (ui.seen.has(key)) return;
+    ui.seen.add(key); ui.seenQ.push(key); if (ui.seenQ.length > 600) ui.seen.delete(ui.seenQ.shift());
+    if (window.__duoStall || ui.byed.has(env.s)) return;      // 떠난다고 한 페이지의 늦은 편지는 무시
+    const m = env.m, now = Date.now();
+    let p = ui.conn;
+    if (!p || p.inst !== env.s) {
+      if (m.t === "bye") return;
+      // 다른 페이지가 보였어요. 상대가 새로고침했거나(같은 사람) 상대 소식이 끊겼으면 새로 짝지어요.
+      if (p && p.uid !== env.u && now - p.lastRx < DEAD) return;
+      link(env.s, env.u);
+      p = ui.conn;
     }
+    p.lastRx = ui.lastRx = now;
+    if (m.t === "bye") { ui.byed.add(env.s); partnerGone(); if (!ui.isHost) becomeHost(); return; }   // 상대가 페이지를 닫았어요
+    const away = !!(m.t === "away" || m.away);
+    if (away !== ui.peerAway) { ui.peerAway = away; paintConn(); }
+    if (m.t === "knock") { sayHello(); return; }               // 상대가 나를 잃어버렸어요 → 다시 인사
+    if (m.t === "away") return;
+    onMsg(m);
   }
-  function usePeer(peer, k, below) {
-    peer._used = true;
-    ui.peer = peer; ui.slot = k; ui.below = below; ui.peerT = Date.now(); ui.tries = 0; ui.discSince = 0;
-    dbg("slot", k, "below", below);
-    peer.on("connection", conn => { if (ui.peer === peer) attach(conn, true); });
-    // 중개 서버와 끊김(폰 화면이 꺼졌다 켜질 때 흔함) → 같은 이름으로 다시 붙는다
-    peer.on("disconnected", () => {
-      if (ui.peer !== peer || peer._dead || peer.destroyed) return;
-      const now = Date.now(); ui.discSince = ui.discSince || now;
-      if (now - (ui.reT || 0) > 2000) { ui.reT = now; try { peer.reconnect(); } catch (e) {} }   // 너무 잦으면 1.5초 점검에 맡겨요
-    });
-    peer.on("error", err => {
-      if (ui.peer !== peer) return;
-      const t = err && err.type;
-      dbg("error", t, err && err.message);
-      if (t === "peer-unavailable") {                          // 건 자리에 아무도 없어요 → 다음 점검 때 다시 걸어요
-        const m = /(\d+)\s*$/.exec(String(err.message || "")); const j = m ? +m[1] : -1;
-        ui.dials = (ui.dials || []).filter(c => { if (c._slot === j && !c._opened) { try { c.close(); } catch (e) {} return false; } return true; });
-      } else if (t === "unavailable-id") retry(300);           // 다시 붙는 사이에 내 자리를 남이 가져갔어요 → 자리를 새로 잡아요
-      else if (!ui.conn && (peer.destroyed || t === "server-error" || t === "socket-error" || t === "socket-closed")) { ui.peerStatus = "lost"; render(); retry(2500); }
-    });
-    if (below.length) { if (!ui.roled) becomeGuest(); ui.peerStatus = ui.isHost ? "waiting" : "connecting"; render(); dial(); }
-    else if (!ui.roled || !ui.isHost) becomeHost();
-    else { if (!ui.conn) ui.peerStatus = "waiting"; render(); }
+  function link(inst, uid) {
+    const host = amHostWith(uid, inst);
+    ui.conn = { inst, uid, lastRx: Date.now() };
+    dbg("partner", inst, host ? "I am host" : "I am guest");
+    if (host && (!ui.isHost || !ui.roled)) becomeHost();
+    else if (!host && (ui.isHost || !ui.roled)) becomeGuest();
+    ui.peerStatus = "connected"; ui.error = ""; ui.peerAway = false;
+    sayHello();
+    render();
   }
-  // 나보다 낮은 자리(먼저 와 있던 쪽)에 연결을 건다. 이미 걸어 둔 곳은 건너뛴다.
-  function dial() {
-    const peer = ui.peer;
-    if (!peer || peer.destroyed || peer.disconnected || ui.conn) return;
-    ui.dials = (ui.dials || []).filter(c => !c._dropped);
-    let any = false;
-    ui.below.forEach(j => {
-      if (ui.dials.some(c => c._slot === j)) return;
-      let conn; try { conn = peer.connect(slotId(j), { reliable: true, serialization: "json" }); } catch (e) { return; }
-      if (!conn) return;
-      conn._slot = j; ui.dials.push(conn); any = true;
-      attach(conn, false);
-      setTimeout(() => { if (!conn._opened) { conn._dropped = true; try { conn.close(); } catch (e) {} } }, 8000);   // 유령 자리는 대답이 없어요
-    });
-    if (any) { ui.tries += 1; ui.lastDial = Date.now(); if (!ui.isHost) { ui.peerStatus = "connecting"; paintConn(); } }
+  function sayHello() {
+    send({ t: "hello", id: ui.myId, name: ui.name, state: ui.online, seq: seqOf() });
+    if (!ui.isHost) flushPending();
   }
-  function attach(conn, incoming) {
-    conn.on("open", () => {
-      if (ui.peer && conn.provider && conn.provider !== ui.peer) { try { conn.close(); } catch (e) {} return; }
-      conn._opened = true;
-      if (ui.conn && ui.conn !== conn) { const old = ui.conn; ui.conn = null; try { old.close(); } catch (e) {} }   // 새 연결이 이겨요 (상대가 새로고침한 경우)
-      (ui.dials || []).forEach(c => { if (c !== conn) { c._dropped = true; try { c.close(); } catch (e) {} } }); ui.dials = [];
-      if (incoming && !ui.isHost) becomeHost();
-      else if (!incoming && (ui.isHost || !ui.roled)) becomeGuest();
-      ui.conn = conn; ui.peerStatus = "connected"; ui.error = ""; ui.lastRx = Date.now(); ui.peerAway = false; ui.tries = 0;
-      dbg("connected", incoming ? "in (host)" : "out (guest)");
-      send({ t: "hello", id: ui.myId, name: ui.name, state: ui.online, seq: seqOf() });
-      if (!ui.isHost) flushPending();
-      render();
-    });
-    conn.on("data", m => {
-      if (window.__duoStall || ui.conn !== conn) return;
-      ui.lastRx = Date.now();
-      if (m && m.t === "bye") {                                       // 상대가 페이지를 닫았다 → 기다리지 않고 바로 정리
-        try { conn.close(); } catch (e) {} gone();
-        if (!ui.isHost) becomeHost();                                 // 방장이 나갔으니 내가 판을 맡아요
-        return;
-      }
-      const away = !!(m && (m.t === "away" || m.away));
-      if (away !== ui.peerAway) { ui.peerAway = away; paintConn(); }
-      if (!away) onMsg(m);
-    });
-    const gone = () => {
-      if (ui.conn !== conn) return;
-      ui.conn = null; ui.peerAway = false; ui.peerStatus = ui.isHost ? "waiting" : "lost"; render();
-      setTimeout(dial, 300 + rnd(400));                         // 낮은 자리 쪽이면 바로 다시 걸어 봐요
-    };
-    conn.on("close", gone); conn.on("error", gone);
-    conn._gone = gone;
+  function partnerGone() {
+    if (!ui.conn) return;
+    ui.conn = null; ui.peerAway = false; ui.goneT = Date.now();
+    ui.peerStatus = !upCount() ? "lost" : ui.isHost ? "waiting" : "lost";
+    render();
   }
   const DROP = +(params.get("droptest") || 0);          // 시험용: 메시지를 일부러 이 비율만큼 버린다
   function send(m) {
     if ((DROP && Math.random() < DROP) || window.__duoStall) return false;
     if (document.hidden) m = Object.assign({ away: 1 }, m);      // 다른 앱에 가 있는 동안 보내는 건 "자리 비움" 표시를 달아요
-    try { if (ui.conn && ui.conn.open) { ui.conn.send(m); return true; } } catch (e) {}
-    return false;
+    if (!ui.conn) return false;
+    return pub(m, ui.conn.inst);
   }
   const seqOf = () => (ui.online ? ui.online.seq : 0);
 
@@ -405,57 +349,41 @@ window.Duo = function (game) {
     if (ui.isHost && m.t === "need") sendSync();
   }
 
-  /* 1.5초마다: 서로 상태 번호 확인, 못 받은 행동 다시 보내기, 응답이 끊긴 연결 정리, 중개 서버 연결 점검 */
-  const DEAD = 7000;
-  function dropConn() { const c = ui.conn; if (!c) return; try { c.close(); } catch (e) {} if (c._gone) c._gone(); }
+  /* 1.5초마다: 서로 상태 번호 확인, 못 받은 행동 다시 보내기, 소식이 끊긴 상대 정리 */
+  const DEAD = 8000, AWAY_DEAD = 90000;                       // 상대가 다른 앱에 가 있으면 넉넉히 기다려요
   setInterval(() => {
-    if (!ui.room) return;
-    const peer = ui.peer, now = Date.now();
-    if (peer && !retryTimer && !peer._dead) {
-      if (peer.destroyed) { if (!ui.conn) claim(); }
-      else if (peer.disconnected) {
-        ui.discSince = ui.discSince || now;
-        if (now - ui.discSince > 10000 && !ui.conn) { dbg("server gone too long → claim again"); claim(); }   // 오래 못 붙으면 자리부터 새로
-        else if (now - (ui.reT || 0) > 3000) { ui.reT = now; try { peer.reconnect(); } catch (e) {} }
-      } else ui.discSince = 0;
-    }
-    if (!peer && !retryTimer && ui.peerStatus !== "opening" && ui.peerStatus !== "error") claim();
+    if (!ui.room || !ui.clients.length) return;
+    const now = Date.now();
     if (!ui.conn) {
-      if (peer && ui.below && ui.below.length) {
-        dial();
-        // 아래 자리들이 오래 대답이 없으면(유령뿐이면) 일단 내가 판을 맡고, 걸기는 계속해요
-        if (!ui.isHost && now - (ui.peerT || 0) > 9000) becomeHost();
-      }
+      if (upCount()) pub({ t: "knock" });
+      // 서버에 붙고 3초가 지나도 아무도 없으면 내가 판을 맡아요. 손님이던 쪽은 상대가 15초 넘게 없을 때만.
+      if (ui.upT && now - ui.upT > 3000 && (!ui.roled || (!ui.isHost && now - (ui.goneT || 0) > 15000))) becomeHost();
       paintConn(); return;
     }
-    if (now - (ui.lastRx || 0) > DEAD) { dropConn(); return; }
+    if (now - ui.conn.lastRx > (ui.peerAway ? AWAY_DEAD : DEAD)) { partnerGone(); return; }
     if (ui.isHost) send({ t: "ping", seq: seqOf(), ack: ui.lastAid || 0 });
     else {
-      if (!ui.online || mySeat(ui.online) < 0) send({ t: "hello", id: ui.myId, name: ui.name, state: ui.online, seq: seqOf() });   // 아직 자리에 안 들어갔으면 인사 다시
+      if (!ui.online || mySeat(ui.online) < 0) sayHello();      // 아직 자리에 안 들어갔으면 인사 다시
       flushPending(); send({ t: "ping", seq: seqOf() });
     }
     paintConn();
   }, 1500);
   // 다른 앱(카톡 등)에 갔다가 돌아오거나, 사파리가 뒤로 가기로 페이지를 되살리면 바로 다시 맞춘다
   const resume = () => {
-    if (!ui.room) return;
+    if (!ui.room || !ui.clients.length) return;
     if (document.hidden) { send({ t: "away" }); return; }      // 잠깐 자리 비움을 상대에게 알려요
-    const peer = ui.peer;
-    if (!peer || peer.destroyed) { if (!retryTimer) claim(); return; }
-    if (peer.disconnected) { ui.reT = Date.now(); try { peer.reconnect(); } catch (e) {} }
-    if (ui.conn && Date.now() - (ui.lastRx || 0) > 5000) dropConn();
-    if (!ui.conn) { dial(); return; }
+    ui.clients.forEach(c => { if (!c.connected && !c.reconnecting) { try { c.reconnect(); } catch (e) {} } });
+    if (!ui.conn) { pub({ t: "knock" }); return; }
     if (ui.isHost) sendSync(); else { flushPending(); send({ t: "ping", seq: seqOf() }); }
   };
   document.addEventListener("visibilitychange", resume);
-  // 페이지를 떠날 때: 상대에게 알리고 자리를 바로 돌려줘요 (안 그러면 서버에 유령으로 남아요)
-  window.addEventListener("pagehide", () => { if (!ui.room) return; send({ t: "bye" }); killPeer(ui.peer); ui.peer = null; ui.conn = null; });
-  window.addEventListener("pageshow", e => { if (e.persisted && ui.room) { ui.lastRx = 0; claim(); } });
-  // 연결 버튼의 "다시 연결하기": 처음부터 자리 잡기를 다시 해요
+  window.addEventListener("pagehide", () => { if (!ui.room) return; send({ t: "bye" }); ui.leaving = true; setTimeout(closeMail, 0); });
+  window.addEventListener("pageshow", e => { if (e.persisted && ui.room) { ui.leaving = false; ui.conn = null; ui.inst = "i" + Date.now().toString(36) + rnd(1e9).toString(36); openMail(); } });
+  // 연결 버튼의 "다시 연결하기": 서버 연결부터 새로
   function reconnectNow() {
     if (!ui.room) return;
-    ui.tries = 0;
-    claim();
+    ui.conn = null; ui.peerStatus = "opening"; render();
+    openMail();
   }
 
   /* ───── rendering ───── */
@@ -467,11 +395,12 @@ window.Duo = function (game) {
       return { cls: "ok", txt: "연결됨", why: "상대와 잘 연결돼 있어요." };
     }
     if (st === "waiting") return { cls: "", txt: "상대 기다리는 중", why: "이 폰이 판을 열어 두고 상대를 기다려요. 상대 폰에서 이 게임을 열면 자동으로 붙어요." };
-    if (st === "connecting") return { cls: "", txt: ui.tries > 1 ? `연결 중 (${ui.tries})` : "연결 중", why: "상대 폰이 연 판에 붙는 중이에요." };
-    if (st === "lost") return { cls: "bad", txt: "다시 연결 중", why: "연결이 끊겨서 다시 붙는 중이에요." };
+    if (st === "lost") return upCount()
+      ? { cls: "bad", txt: "상대 소식 없음", why: "우체통 서버엔 붙어 있는데 상대 폰에서 소식이 없어요. 상대가 게임을 다시 열면 바로 이어져요." }
+      : { cls: "bad", txt: "다시 연결 중", why: "인터넷이나 우체통 서버와 연결이 끊겨서 다시 붙는 중이에요." };
     if (st === "full") return { cls: "bad", txt: "방이 가득 찼어요", why: "상대 폰에서 다른 사람과 하던 판이 진행 중이에요." };
     if (st === "error") return { cls: "bad", txt: "연결 안 됨", why: ui.error || "연결할 수 없어요." };
-    return { cls: "", txt: "준비 중", why: "연결 서버에 접속하는 중이에요." };
+    return { cls: "", txt: "준비 중", why: "우체통 서버에 접속하는 중이에요." };
   }
   const connPill = () => {
     if (!ui.room) return "";
@@ -617,7 +546,7 @@ window.Duo = function (game) {
     if (sh.kind === "conn") {
       const c = connInfo();
       return wrapSheet(`<h2>연결 상태 — ${esc(c.txt)}</h2><p id="duo-conn-why">${esc(c.why)}</p>
-        <p class="duo-note">이 폰: ${ui.isHost ? "판을 연 쪽 (방장)" : "상대가 연 판에 붙은 쪽"}. 하던 판은 두 폰에 모두 저장돼 있어서 다시 연결해도 사라지지 않아요.</p>
+        <p class="duo-note">우체통 서버 ${upCount()}/${BROKERS.length}곳에 연결됨 · 이 폰: ${ui.isHost ? "방장" : "손님"}. 하던 판은 두 폰에 모두 저장돼 있어서 다시 연결해도 사라지지 않아요.</p>
         <div class="duo-row"><button class="duo-btn primary" data-duo="reconnect"><b>다시 연결하기</b><span>표시가 이상하거나 오래 안 붙으면 눌러 보세요</span></button></div>
         <p class="duo-note">그래도 안 되면 두 폰 모두 와이파이나 데이터가 켜져 있는지 확인하고, 두 폰에서 이 페이지를 새로고침해 주세요.</p>`, "연결 상태");
     }
